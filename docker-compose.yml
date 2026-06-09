@@ -1,0 +1,45 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: quicknav-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: quicknavigation
+      MYSQL_USER: quicknav
+      MYSQL_PASSWORD: quicknav123
+    ports:
+      - "3309:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uquicknav", "-pquicknav123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    container_name: quicknav-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://quicknav:quicknav123@mysql:3306/quicknavigation
+      CORS_ORIGINS: "*"
+      GITHUB_WEBHOOK_SECRET: change-me-github-secret
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: quicknav-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:

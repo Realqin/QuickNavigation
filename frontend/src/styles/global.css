@@ -1,0 +1,334 @@
+* {
+
+  box-sizing: border-box;
+
+}
+
+
+
+body {
+
+  margin: 0;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+
+    sans-serif;
+
+  background: #f0f2f5;
+
+  color: #1f2937;
+
+}
+
+
+
+a {
+
+  color: #1677ff;
+
+  text-decoration: none;
+
+}
+
+
+
+/* ---- App shell ---- */
+
+.app-shell {
+
+  min-height: 100vh;
+
+}
+
+
+
+.app-header {
+
+  display: flex;
+
+  align-items: center;
+
+  background: linear-gradient(90deg, #0f172a, #1e3a5f);
+
+  padding: 0 24px;
+
+  height: 56px;
+
+  line-height: 56px;
+
+}
+
+
+
+.app-body {
+
+  min-height: calc(100vh - 56px);
+
+}
+
+
+
+.app-sider {
+
+  border-right: 1px solid #e5e7eb;
+
+  background: #fff !important;
+
+}
+
+
+
+.app-sider .ant-menu {
+
+  border-inline-end: none !important;
+
+  padding-top: 8px;
+
+}
+
+
+
+.app-main {
+
+  background: #f0f2f5;
+
+}
+
+
+
+.app-content {
+
+  padding: 0;
+
+  min-height: calc(100vh - 56px);
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
+.app-tabs {
+
+  flex: 1;
+
+  display: flex;
+
+  flex-direction: column;
+
+  background: #fff;
+
+}
+
+
+
+.app-tabs > .ant-tabs-nav {
+
+  margin-bottom: 0;
+
+  padding: 0 12px;
+
+  background: #fafafa;
+
+  border-bottom: 1px solid #e5e7eb;
+
+}
+
+
+
+.app-tabs > .ant-tabs-content-holder {
+
+  flex: 1;
+
+  overflow: auto;
+
+  background: #f5f7fb;
+
+}
+
+
+
+.app-tabs .ant-tabs-tabpane {
+
+  height: 100%;
+
+}
+
+
+
+.tab-pane-body {
+
+  min-height: calc(100vh - 56px - 46px);
+
+}
+
+
+
+/* ---- Tab page common ---- */
+
+.tab-page {
+
+  padding: 16px 20px 24px;
+
+}
+
+
+
+.tab-page-toolbar {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-bottom: 16px;
+
+  flex-wrap: wrap;
+
+}
+
+
+
+/* ---- Home page ---- */
+
+.home-page {
+
+  display: flex;
+
+  flex-direction: column;
+
+  min-height: calc(100vh - 56px - 46px);
+
+}
+
+
+
+.home-layout {
+
+  flex: 1;
+
+  background: transparent;
+
+}
+
+
+
+.home-content {
+
+  padding: 0 16px 16px;
+
+  background: transparent;
+
+}
+
+
+
+.home-log-sider {
+
+  border-left: 1px solid #e5e7eb;
+
+  padding: 0 12px 12px;
+
+  background: #fff !important;
+
+}
+
+
+
+.card-grid {
+
+  display: grid;
+
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+
+  gap: 12px;
+
+}
+
+
+
+.connection-card {
+
+  cursor: pointer;
+
+  height: 100%;
+
+}
+
+
+
+.drag-handle {
+
+  cursor: grab;
+
+  color: #9ca3af;
+
+}
+
+
+
+.log-panel {
+
+  height: calc(100vh - 56px - 46px - 60px);
+
+  overflow: auto;
+
+}
+
+
+
+.log-item {
+
+  cursor: pointer;
+
+  border-radius: 8px;
+
+  padding-inline: 8px !important;
+
+}
+
+
+
+.log-item.unread {
+
+  background: #eff6ff;
+
+}
+
+
+
+.log-item.read {
+
+  opacity: 0.85;
+
+}
+
+
+
+.sub-links-collapse {
+
+  margin-top: 4px;
+
+}
+
+
+
+.sub-links-collapse .ant-collapse-header {
+
+  padding: 4px 8px !important;
+
+}
+
+
+
+.sub-link-item {
+
+  padding-inline: 0 !important;
+
+}
+
