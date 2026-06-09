@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,8 @@ DICT_ENVIRONMENT = "environment"
 
 DICT_LABEL = "label"
 
+FILTER_EMPTY = 0  # 筛选「其他」：项目/环境未填写
+
 
 
 
@@ -51,7 +53,9 @@ def _json_contains(column, value: int):
     return func.json_contains(column, json.dumps(value))
 
 
+def _json_is_empty(column):
 
+    return or_(column.is_(None), func.coalesce(func.json_length(column), 0) == 0)
 
 
 def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -373,6 +377,8 @@ def list_connections(
 
     environment: int | None = None,
 
+    is_shared: bool | None = None,
+
 ) -> list[Connection]:
 
     query = db.query(Connection)
@@ -381,13 +387,29 @@ def list_connections(
 
         query = query.filter(Connection.name.contains(name))
 
+    if is_shared is not None:
+
+        query = query.filter(Connection.is_shared.is_(is_shared))
+
     if project is not None:
 
-        query = query.filter(_json_contains(Connection.projects, project))
+        if project == FILTER_EMPTY:
+
+            query = query.filter(_json_is_empty(Connection.projects))
+
+        else:
+
+            query = query.filter(_json_contains(Connection.projects, project))
 
     if environment is not None:
 
-        query = query.filter(_json_contains(Connection.environments, environment))
+        if environment == FILTER_EMPTY:
+
+            query = query.filter(_json_is_empty(Connection.environments))
+
+        else:
+
+            query = query.filter(_json_contains(Connection.environments, environment))
 
     return query.order_by(Connection.sort_order.asc(), Connection.id.asc()).all()
 

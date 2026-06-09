@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchDictItems } from '../api';
 import type { DictItem, DictType } from '../types';
 
+export {
+  buildLabelColorMap,
+  buildLabelIconIndexMap,
+  buildLabelOrderMap,
+  sortConnectionsByTypeOrder,
+} from '../utils/labelTheme';
+
 export function dictToOptions(items: DictItem[]) {
   return items.map((item) => ({
     label: item.description ? `${item.name}（${item.description}）` : item.name,

@@ -22,10 +22,13 @@ export async function fetchHome(project: number, environment: number): Promise<H
   return data;
 }
 
+export const FILTER_EMPTY = 0;
+
 export async function fetchConnections(params?: {
   name?: string;
   project?: number;
   environment?: number;
+  is_shared?: boolean;
 }): Promise<Connection[]> {
   const { data } = await client.get<Connection[]>('/api/connections', { params });
   return data;

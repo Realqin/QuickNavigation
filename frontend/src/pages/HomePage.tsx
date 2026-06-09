@@ -1,9 +1,10 @@
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Button, Layout, Select, Space, Typography, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createConnection,
   createLogsWebSocket,
+  deleteConnection,
   fetchHome,
   fetchLogs,
   markLogRead,
@@ -13,7 +14,7 @@ import {
 import ActivityLogPanel from '../components/ActivityLogPanel';
 import ConnectionFormModal from '../components/ConnectionFormModal';
 import ConnectionSection from '../components/ConnectionSection';
-import { dictToOptions, useDict } from '../hooks/useDict';
+import { buildLabelColorMap, buildLabelIconIndexMap, buildLabelOrderMap, dictToOptions, useDict } from '../hooks/useDict';
 import type { ActivityLog, Connection, ConnectionFormValues } from '../types';
 
 const { Content, Sider } = Layout;
@@ -32,7 +33,11 @@ function loadStorageNumber(key: string): number | null {
 export default function HomePage() {
   const { items: projectItems, options: projectOptions, idMap: projectIdMap } = useDict('project');
   const { items: envItems, options: environmentOptions, idMap: envIdMap } = useDict('environment');
-  const { options: labelOptions, idMap: labelIdMap } = useDict('label');
+  const { items: labelItems, options: labelOptions, idMap: labelIdMap } = useDict('label');
+
+  const labelColorMap = useMemo(() => buildLabelColorMap(labelItems), [labelItems]);
+  const labelOrderMap = useMemo(() => buildLabelOrderMap(labelItems), [labelItems]);
+  const labelIconIndexMap = useMemo(() => buildLabelIconIndexMap(labelItems), [labelItems]);
 
   const [project, setProject] = useState<number | null>(() => loadStorageNumber(PROJECT_KEY));
   const [environment, setEnvironment] = useState<number | null>(() => loadStorageNumber(ENV_KEY));
@@ -40,6 +45,7 @@ export default function HomePage() {
   const [scoped, setScoped] = useState<Connection[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [sharedExpanded, setSharedExpanded] = useState(
@@ -148,6 +154,16 @@ export default function HomePage() {
     }
   };
 
+  const handleDelete = async (conn: Connection) => {
+    try {
+      await deleteConnection(conn.id);
+      message.success('删除成功');
+      loadData();
+    } catch {
+      message.error('删除失败');
+    }
+  };
+
   const selectProjectOptions = projectOptions.length ? projectOptions : dictToOptions(projectItems);
   const selectEnvironmentOptions = environmentOptions.length
     ? environmentOptions
@@ -160,9 +176,18 @@ export default function HomePage() {
   return (
     <div className="home-page">
       <div className="tab-page-toolbar">
-        <Typography.Title level={5} style={{ margin: 0 }}>
-          快捷导航
-        </Typography.Title>
+        <Space align="center" size={12}>
+          <Typography.Title level={5} style={{ margin: 0 }}>
+            快捷导航
+          </Typography.Title>
+          <Button
+            icon={<EditOutlined />}
+            type={editMode ? 'primary' : 'default'}
+            onClick={() => setEditMode((prev) => !prev)}
+          >
+            {editMode ? '退出编辑' : '编辑'}
+          </Button>
+        </Space>
         <Space wrap>
           <Select
             style={{ width: 180 }}
@@ -202,13 +227,18 @@ export default function HomePage() {
             panelKey="shared"
             connections={shared}
             expanded={sharedExpanded}
+            editMode={editMode}
             onExpandChange={handleExpandChange}
             onReorder={(list) => applyReorder('shared', list, setShared)}
             onEdit={(conn) => {
               setEditing(conn);
               setModalOpen(true);
             }}
+            onDelete={handleDelete}
             labelIdMap={labelIdMap}
+            labelColorMap={labelColorMap}
+            labelIconIndexMap={labelIconIndexMap}
+            labelOrderMap={labelOrderMap}
             projectIdMap={projectIdMap}
             envIdMap={envIdMap}
           />
@@ -218,6 +248,7 @@ export default function HomePage() {
             panelKey="scoped"
             connections={scoped}
             expanded={scopedExpanded}
+            editMode={editMode}
             onExpandChange={handleExpandChange}
             onReorder={(list) =>
               applyReorder(
@@ -230,7 +261,11 @@ export default function HomePage() {
               setEditing(conn);
               setModalOpen(true);
             }}
+            onDelete={handleDelete}
             labelIdMap={labelIdMap}
+            labelColorMap={labelColorMap}
+            labelIconIndexMap={labelIconIndexMap}
+            labelOrderMap={labelOrderMap}
             projectIdMap={projectIdMap}
             envIdMap={envIdMap}
           />

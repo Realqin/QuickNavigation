@@ -86,9 +86,16 @@ def get_connections(
     name: str | None = Query(None),
     project: int | None = Query(None),
     environment: int | None = Query(None),
+    is_shared: bool | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    return list_connections(db, name=name, project=project, environment=environment)
+    return list_connections(
+        db,
+        name=name,
+        project=project,
+        environment=environment,
+        is_shared=is_shared,
+    )
 
 
 @router.get("/connections/home", response_model=HomeResponse)

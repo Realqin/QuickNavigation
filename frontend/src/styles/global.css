@@ -262,6 +262,74 @@ a {
 
 
 
+.connection-card .ant-card-body {
+
+  position: relative;
+
+}
+
+
+
+.connection-card__content {
+
+  position: relative;
+
+  min-height: 64px;
+
+  padding-bottom: 28px;
+
+}
+
+
+
+.connection-card__main {
+
+  width: 100%;
+
+}
+
+
+
+.connection-card__tags {
+
+  position: absolute;
+
+  right: 0;
+
+  bottom: 0;
+
+  display: flex;
+
+  flex-wrap: wrap;
+
+  justify-content: flex-end;
+
+  align-items: flex-end;
+
+  gap: 4px;
+
+  max-width: 100%;
+
+}
+
+
+
+.connection-card--edit {
+
+  cursor: default;
+
+}
+
+
+
+.connection-card__name {
+
+  font-weight: 500;
+
+}
+
+
+
 .drag-handle {
 
   cursor: grab;

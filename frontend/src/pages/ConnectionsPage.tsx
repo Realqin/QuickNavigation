@@ -26,6 +26,7 @@ import {
   createConnection,
   deleteConnection,
   fetchConnections,
+  FILTER_EMPTY,
   pingConnection,
   updateConnection,
 } from '../api';
@@ -37,7 +38,13 @@ interface FilterValues {
   name?: string;
   project?: number;
   environment?: number;
+  is_shared?: boolean;
 }
+
+const SHARED_FILTER_OPTIONS = [
+  { label: '是', value: true },
+  { label: '否', value: false },
+];
 
 type RowKind = 'parent' | 'child';
 
@@ -102,6 +109,14 @@ function buildRows(connections: Connection[], expandedIds: Set<number>): Connect
 export default function ConnectionsPage() {
   const { projects, environments, labels } = useDictGroup();
   const [form] = Form.useForm<FilterValues>();
+  const projectFilterOptions = useMemo(
+    () => [{ label: '其他', value: FILTER_EMPTY }, ...projects.options],
+    [projects.options],
+  );
+  const environmentFilterOptions = useMemo(
+    () => [{ label: '其他', value: FILTER_EMPTY }, ...environments.options],
+    [environments.options],
+  );
   const [data, setData] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -123,6 +138,7 @@ export default function ConnectionsPage() {
         name: values.name || undefined,
         project: values.project,
         environment: values.environment,
+        is_shared: values.is_shared,
       });
       setData(list);
       setSelectedRowKeys((prev) => prev.filter((id) => list.some((item) => item.id === id)));
@@ -178,7 +194,7 @@ export default function ConnectionsPage() {
   };
 
   const handleValuesChange = (changed: Partial<FilterValues>, allValues: FilterValues) => {
-    if ('project' in changed || 'environment' in changed) {
+    if ('project' in changed || 'environment' in changed || 'is_shared' in changed) {
       loadData(allValues);
       return;
     }
@@ -296,7 +312,7 @@ export default function ConnectionsPage() {
             allowClear
             style={{ width: 160 }}
             placeholder="项目"
-            options={projects.options}
+            options={projectFilterOptions}
           />
         </Form.Item>
         <Form.Item name="environment" label="环境">
@@ -304,7 +320,15 @@ export default function ConnectionsPage() {
             allowClear
             style={{ width: 140 }}
             placeholder="环境"
-            options={environments.options}
+            options={environmentFilterOptions}
+          />
+        </Form.Item>
+        <Form.Item name="is_shared" label="共用">
+          <Select
+            allowClear
+            style={{ width: 100 }}
+            placeholder="全部"
+            options={SHARED_FILTER_OPTIONS}
           />
         </Form.Item>
       </Form>

@@ -1,47 +1,57 @@
 import {
-  DatabaseOutlined,
+  DeleteOutlined,
   EditOutlined,
-  GithubOutlined,
-  GlobalOutlined,
   HolderOutlined,
 } from '@ant-design/icons';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Card, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Popconfirm, Space, Tag, Typography } from 'antd';
 import type { Connection } from '../types';
+import { getTypeTextColor, hexWithAlpha, resolveTypeIcon } from '../utils/labelTheme';
 import SubLinksPanel from './SubLinksPanel';
-
-function getTypeIcon(typeName?: string) {
-  const key = (typeName ?? '').toLowerCase();
-  if (key.includes('github')) return <GithubOutlined />;
-  if (key.includes('数据库') || key.includes('database')) return <DatabaseOutlined />;
-  return <GlobalOutlined />;
-}
-
-function getTypeColor(typeName?: string) {
-  const key = (typeName ?? '').toLowerCase();
-  if (key.includes('github')) return 'purple';
-  if (key.includes('数据库') || key.includes('database')) return 'green';
-  return 'blue';
-}
 
 interface Props {
   connection: Connection;
   typeLabel?: string;
+  typeColor?: string;
+  typeIconIndex?: number;
   projectLabels?: string[];
   envLabels?: string[];
+  editMode?: boolean;
   onEdit: (connection: Connection) => void;
+  onDelete?: (connection: Connection) => void;
+}
+
+function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
+  const fillColor = getTypeTextColor(colorKey);
+  return (
+    <Tag
+      style={{
+        color: 'rgba(0, 0, 0, 0.88)',
+        border: 'none',
+        backgroundColor: hexWithAlpha(fillColor, 0.18),
+        marginInlineEnd: 0,
+      }}
+    >
+      {label}
+    </Tag>
+  );
 }
 
 export default function ConnectionCard({
   connection,
   typeLabel,
+  typeColor = 'blue',
+  typeIconIndex = 0,
   projectLabels = [],
   envLabels = [],
+  editMode = false,
   onEdit,
+  onDelete,
 }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
+    disabled: !editMode,
   });
 
   const style: React.CSSProperties = {
@@ -51,50 +61,80 @@ export default function ConnectionCard({
   };
 
   const displayType = typeLabel ?? '连接';
-  const openMainUrl = () => window.open(connection.url, '_blank', 'noopener,noreferrer');
+  const TypeIcon = resolveTypeIcon(displayType, typeIconIndex);
+  const typeFillColor = getTypeTextColor(typeColor);
+  const headBackground = hexWithAlpha(typeFillColor, 0.18);
+
+  const openMainUrl = () => {
+    if (editMode) return;
+    window.open(connection.url, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
       <Card
         size="small"
-        hoverable
-        className="connection-card"
+        hoverable={!editMode}
+        className={`connection-card${editMode ? ' connection-card--edit' : ''}`}
+        styles={{
+          header: {
+            backgroundColor: headBackground,
+            borderBottom: `1px solid ${hexWithAlpha(typeFillColor, 0.28)}`,
+          },
+        }}
         onClick={openMainUrl}
         title={
           <Space>
-            <span
-              {...listeners}
-              className="drag-handle"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <HolderOutlined />
-            </span>
-            {getTypeIcon(displayType)}
-            <span>{connection.name}</span>
+            {editMode && (
+              <span
+                {...listeners}
+                className="drag-handle"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <HolderOutlined />
+              </span>
+            )}
+            <TypeIcon style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 16 }} />
+            <span className="connection-card__name">{connection.name}</span>
           </Space>
         }
         extra={
-          <Tooltip title="编辑">
-            <EditOutlined
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(connection);
-              }}
-            />
-          </Tooltip>
+          editMode ? (
+            <Space size={4} onClick={(e) => e.stopPropagation()}>
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => onEdit(connection)}
+              />
+              <Popconfirm
+                title="确认删除该连接？"
+                onConfirm={() => onDelete?.(connection)}
+              >
+                <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </Space>
+          ) : null
         }
       >
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          <Typography.Text type="secondary" ellipsis>
-            {connection.url}
-          </Typography.Text>
-          {connection.description && (
-            <Typography.Text type="secondary" ellipsis>
-              {connection.description}
-            </Typography.Text>
-          )}
-          <Space wrap>
-            <Tag color={getTypeColor(displayType)}>{displayType}</Tag>
+        <div className="connection-card__content">
+          <div className="connection-card__main">
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Typography.Text type="secondary" ellipsis>
+                {connection.url}
+              </Typography.Text>
+              {connection.description && (
+                <Typography.Text type="secondary" ellipsis>
+                  {connection.description}
+                </Typography.Text>
+              )}
+            </Space>
+            <div onClick={(e) => e.stopPropagation()}>
+              <SubLinksPanel subLinks={connection.sub_links} />
+            </div>
+          </div>
+          <div className="connection-card__tags" onClick={(e) => e.stopPropagation()}>
+            <TypeTag label={displayType} colorKey={typeColor} />
             {!connection.is_shared && (
               <>
                 {projectLabels.map((item) => (
@@ -107,11 +147,8 @@ export default function ConnectionCard({
                 ))}
               </>
             )}
-          </Space>
-          <div onClick={(e) => e.stopPropagation()}>
-            <SubLinksPanel subLinks={connection.sub_links} />
           </div>
-        </Space>
+        </div>
       </Card>
     </div>
   );

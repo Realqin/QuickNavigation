@@ -14,6 +14,8 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import { Collapse, Empty, Typography } from 'antd';
+import { useMemo } from 'react';
+import { sortConnectionsByTypeOrder } from '../hooks/useDict';
 import type { Connection } from '../types';
 import ConnectionCard from './ConnectionCard';
 
@@ -22,10 +24,15 @@ interface Props {
   panelKey: string;
   connections: Connection[];
   expanded: boolean;
+  editMode?: boolean;
   onExpandChange: (key: string, expanded: boolean) => void;
   onReorder: (items: Connection[]) => void;
   onEdit: (connection: Connection) => void;
+  onDelete?: (connection: Connection) => void;
   labelIdMap?: Record<number, string>;
+  labelColorMap?: Record<number, string>;
+  labelIconIndexMap?: Record<number, number>;
+  labelOrderMap?: Record<number, number>;
   projectIdMap?: Record<number, string>;
   envIdMap?: Record<number, string>;
 }
@@ -35,10 +42,15 @@ export default function ConnectionSection({
   panelKey,
   connections,
   expanded,
+  editMode = false,
   onExpandChange,
   onReorder,
   onEdit,
+  onDelete,
   labelIdMap,
+  labelColorMap,
+  labelIconIndexMap,
+  labelOrderMap = {},
   projectIdMap,
   envIdMap,
 }: Props) {
@@ -47,14 +59,39 @@ export default function ConnectionSection({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const displayConnections = useMemo(
+    () => sortConnectionsByTypeOrder(connections, labelOrderMap),
+    [connections, labelOrderMap],
+  );
+
   const handleDragEnd = (event: DragEndEvent) => {
+    if (!editMode) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = connections.findIndex((c) => c.id === active.id);
-    const newIndex = connections.findIndex((c) => c.id === over.id);
+    const oldIndex = displayConnections.findIndex((c) => c.id === active.id);
+    const newIndex = displayConnections.findIndex((c) => c.id === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
-    onReorder(arrayMove(connections, oldIndex, newIndex));
+    onReorder(arrayMove(displayConnections, oldIndex, newIndex));
   };
+
+  const grid = (
+    <div className="card-grid">
+      {displayConnections.map((conn) => (
+        <ConnectionCard
+          key={conn.id}
+          connection={conn}
+          editMode={editMode}
+          typeLabel={labelIdMap?.[conn.type]}
+          typeColor={labelColorMap?.[conn.type]}
+          typeIconIndex={labelIconIndexMap?.[conn.type] ?? 0}
+          projectLabels={(conn.projects ?? []).map((id) => projectIdMap?.[id] ?? String(id))}
+          envLabels={(conn.environments ?? []).map((id) => envIdMap?.[id] ?? String(id))}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <Collapse
@@ -71,23 +108,14 @@ export default function ConnectionSection({
           children:
             connections.length === 0 ? (
               <Empty description="暂无连接" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
+            ) : editMode ? (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={connections.map((c) => c.id)} strategy={rectSortingStrategy}>
-                  <div className="card-grid">
-                    {connections.map((conn) => (
-                      <ConnectionCard
-                        key={conn.id}
-                        connection={conn}
-                        typeLabel={labelIdMap?.[conn.type]}
-                        projectLabels={(conn.projects ?? []).map((id) => projectIdMap?.[id] ?? String(id))}
-                        envLabels={(conn.environments ?? []).map((id) => envIdMap?.[id] ?? String(id))}
-                        onEdit={onEdit}
-                      />
-                    ))}
-                  </div>
+                <SortableContext items={displayConnections.map((c) => c.id)} strategy={rectSortingStrategy}>
+                  {grid}
                 </SortableContext>
               </DndContext>
+            ) : (
+              grid
             ),
         },
       ]}
