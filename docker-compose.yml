@@ -31,6 +31,27 @@ services:
     volumes:
       - omnidb_data:/home/omnidb/.omnidb/omnidb-server
 
+  sshwifty-app:
+    image: niruix/sshwifty:latest
+    container_name: quicknav-sshwifty-app
+    restart: unless-stopped
+    environment:
+      SSHWIFTY_SHAREDKEY: ""
+      SSHWIFTY_HOSTNAME: ""
+    expose:
+      - "8182"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  sshwifty:
+    build: ./docker/sshwifty
+    container_name: quicknav-sshwifty
+    restart: unless-stopped
+    depends_on:
+      - sshwifty-app
+    ports:
+      - "8182:8182"
+
   backend:
     build: ./backend
     container_name: quicknav-backend
@@ -51,12 +72,16 @@ services:
       OMNIDB_ADMIN_PASSWORD: admin@123
       OMNIDB_MYSQL_HOST: mysql
       OMNIDB_DB_PATH: /omnidb-data/omnidb.db
+      SSHWIFTY_PUBLIC_PORT: 8182
+      SSHWIFTY_SSH_HOST: host.docker.internal
     volumes:
       - omnidb_data:/omnidb-data
     depends_on:
       mysql:
         condition: service_healthy
       omnidb:
+        condition: service_started
+      sshwifty:
         condition: service_started
     ports:
       - "8000:8000"

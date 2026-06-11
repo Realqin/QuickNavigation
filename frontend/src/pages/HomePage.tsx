@@ -9,6 +9,7 @@ import {
   fetchLogs,
   markLogRead,
   openOmnidbConsole,
+  openSshwiftyConsole,
   reorderConnections,
   updateConnection,
 } from '../api';
@@ -25,6 +26,7 @@ import {
 } from '../hooks/useDict';
 import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
 import { openOmnidbInNewTab } from '../utils/omnidb';
+import { openSshwiftyInNewTab } from '../utils/sshwifty';
 import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
 const { Content, Sider } = Layout;
@@ -209,15 +211,32 @@ export default function HomePage() {
     }
   };
 
-  const handleOpenDatabase = async (conn: Connection) => {
-    const hide = message.loading('正在同步数据库并自动连接 OmniDB...', 0);
+  const handleOpenEmbedded = async (conn: Connection, kind: 'database' | 'terminal') => {
+    const hide = message.loading(
+      kind === 'database'
+        ? '正在同步数据库并自动连接 OmniDB...'
+        : '正在打开终端并自动连接 SSH...',
+      0,
+    );
     try {
-      await openOmnidbInNewTab(openOmnidbConsole, conn.id);
+      if (kind === 'database') {
+        await openOmnidbInNewTab(openOmnidbConsole, conn.id);
+      } else {
+        await openSshwiftyInNewTab(openSshwiftyConsole, conn.id);
+      }
     } catch (error) {
       if (error instanceof Error && error.message === 'browser blocked popup') {
         message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
-      } else {
+      } else if (kind === 'database') {
         message.error('打开数据库控制台失败，请确认 OmniDB 已启动（端口 8081）');
+      } else {
+        const detail =
+          error && typeof error === 'object' && 'response' in error
+            ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+            : undefined;
+        message.error(
+          detail || '打开终端失败，请确认 Sshwifty 已启动（端口 8182）且连接已保存密码',
+        );
       }
     } finally {
       hide();
@@ -311,7 +330,7 @@ export default function HomePage() {
                   setModalOpen(true);
                 }}
                 onDelete={handleDelete}
-                onOpen={handleOpenDatabase}
+                onOpen={handleOpenEmbedded}
                 labelItems={labelItems}
                 labelIdMap={labelIdMap}
                 labelColorMap={labelColorMap}

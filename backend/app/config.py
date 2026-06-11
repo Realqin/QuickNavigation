@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     omnidb_admin_password: str = "admin@123"
     omnidb_mysql_host: str = "127.0.0.1"
     omnidb_db_path: str = ""
+    sshwifty_public_port: int = 8182
+    sshwifty_ssh_host: str = "host.docker.internal"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

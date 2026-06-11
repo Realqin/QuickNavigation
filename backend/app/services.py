@@ -887,6 +887,11 @@ def _database_label_ids(db: Session) -> set[int]:
     return {item.id for item in items if item.name == LABEL_DATABASE}
 
 
+def _terminal_label_ids(db: Session) -> set[int]:
+    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
+    return {item.id for item in items if item.name == LABEL_TERMINAL}
+
+
 def _subscription_label_ids(db: Session) -> set[int]:
     return _gitlab_label_ids(db) | _database_label_ids(db)
 
@@ -897,6 +902,10 @@ def connection_is_gitlab_type(db: Session, conn: Connection) -> bool:
 
 def connection_is_database_type(db: Session, conn: Connection) -> bool:
     return conn.type in _database_label_ids(db)
+
+
+def connection_is_terminal_type(db: Session, conn: Connection) -> bool:
+    return conn.type in _terminal_label_ids(db)
 
 
 def _dict_ids_display(db: Session, dict_type: str, ids: list | None) -> str:

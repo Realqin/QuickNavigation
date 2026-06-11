@@ -20,9 +20,10 @@ interface Props {
   envLabels?: string[];
   editMode?: boolean;
   isDatabaseType?: boolean;
+  isTerminalType?: boolean;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
-  onOpen?: (connection: Connection) => void;
+  onOpen?: (connection: Connection, kind: 'database' | 'terminal') => void;
 }
 
 function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
@@ -50,6 +51,7 @@ export default function ConnectionCard({
   envLabels = [],
   editMode = false,
   isDatabaseType = false,
+  isTerminalType = false,
   onEdit,
   onDelete,
   onOpen,
@@ -73,7 +75,11 @@ export default function ConnectionCard({
   const openMainUrl = () => {
     if (editMode) return;
     if (isDatabaseType && onOpen) {
-      onOpen(connection);
+      onOpen(connection, 'database');
+      return;
+    }
+    if (isTerminalType && onOpen) {
+      onOpen(connection, 'terminal');
       return;
     }
     window.open(connection.url, '_blank', 'noopener,noreferrer');

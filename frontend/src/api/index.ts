@@ -11,6 +11,7 @@ import type {
   DictType,
   HomeData,
   OmnidbOpenResult,
+  SshwiftyOpenResult,
   GitlabSubscriptionTree,
   PublicConfig,
   RepoAccessSettings,
@@ -71,6 +72,20 @@ export async function openOmnidbConsole(
 ): Promise<OmnidbOpenResult> {
   const { data } = await client.post<OmnidbOpenResult>(
     `/api/connections/${connectionId}/omnidb-open`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+    },
+  );
+  return data;
+}
+
+export async function openSshwiftyConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<SshwiftyOpenResult> {
+  const { data } = await client.post<SshwiftyOpenResult>(
+    `/api/connections/${connectionId}/sshwifty-open`,
     null,
     {
       params: publicHost ? { public_host: publicHost } : undefined,
