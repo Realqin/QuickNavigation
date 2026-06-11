@@ -14,6 +14,7 @@ class DictItem(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -30,6 +31,7 @@ class Connection(Base):
     projects: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     environments: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     type: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     is_shared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -56,9 +58,11 @@ class Subscription(Base):
     connection_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("connections.id", ondelete="CASCADE"), unique=True, nullable=False
     )
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     github_repo: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    github_branch: Mapped[str | None] = mapped_column(String(128), nullable=True)
     github_events: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    link_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     db_filter: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     webhook_secret: Mapped[str] = mapped_column(String(64), nullable=False)
     notify_homepage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -91,3 +95,33 @@ class ActivityLog(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     connection: Mapped["Connection | None"] = relationship(back_populates="activity_logs")
+
+
+class SchemaSnapshot(Base):
+    __tablename__ = "schema_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class RepoAccessSettings(Base):
+    __tablename__ = "repo_access_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    gitlab_base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    gitlab_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    github_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    public_webhook_base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

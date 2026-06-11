@@ -12,8 +12,16 @@ from app.config import settings
 from app.database import Base, engine, SessionLocal
 from app.models import Connection, DictItem
 from app.ping_scheduler import connection_ping_scheduler
+from app.schema_monitor_scheduler import schema_monitor_scheduler
 from app.routers import api, webhooks
-from app.services import DICT_ENVIRONMENT, DICT_LABEL, DICT_PROJECT
+from app.services import (
+    DICT_CONNECTION_GROUP,
+    DICT_ENVIRONMENT,
+    DICT_LABEL,
+    DICT_PROJECT,
+    PROJECT_CONNECTION_GROUP_NAME,
+)
+from app.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +29,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    scheduler_task = asyncio.create_task(connection_ping_scheduler())
+    ping_task = asyncio.create_task(connection_ping_scheduler())
+    schema_task = asyncio.create_task(schema_monitor_scheduler())
     yield
-    scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    for task in (ping_task, schema_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="QuickNavigation API", version="1.0.0", lifespan=lifespan)
@@ -80,7 +90,8 @@ def seed_dict_items(db) -> None:
         (DICT_ENVIRONMENT, "生产环境", None, 3),
         (DICT_LABEL, "普通连接", None, 0),
         (DICT_LABEL, "GitHub 仓库", "GitHub 代码仓库", 1),
-        (DICT_LABEL, "数据库", "数据库连接", 2),
+        (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2),
+        (DICT_LABEL, "数据库", "数据库连接", 3),
     ]
     db.add_all(
         [
@@ -301,6 +312,24 @@ def seed_connections(db) -> None:
     order_service = _dict_id(db, DICT_PROJECT, "订单服务")
     test_env = _dict_id(db, DICT_ENVIRONMENT, "测试环境")
     dev_env = _dict_id(db, DICT_ENVIRONMENT, "开发环境")
+    project_group = (
+        db.query(DictItem)
+        .filter(
+            DictItem.dict_type == DICT_CONNECTION_GROUP,
+            DictItem.is_system.is_(True),
+        )
+        .first()
+    )
+    shared_group = (
+        db.query(DictItem)
+        .filter(
+            DictItem.dict_type == DICT_CONNECTION_GROUP,
+            DictItem.name == "共用连接",
+        )
+        .first()
+    )
+    if not project_group or not shared_group:
+        return
     seed = [
         Connection(
             name="团队 Wiki",
@@ -309,6 +338,7 @@ def seed_connections(db) -> None:
             projects=[],
             environments=[],
             type=normal,
+            group_id=shared_group.id,
             is_shared=True,
             sort_order=0,
         ),
@@ -319,6 +349,7 @@ def seed_connections(db) -> None:
             projects=[],
             environments=[],
             type=normal,
+            group_id=shared_group.id,
             is_shared=True,
             sort_order=1,
         ),
@@ -329,6 +360,7 @@ def seed_connections(db) -> None:
             projects=[order_service],
             environments=[test_env],
             type=normal,
+            group_id=project_group.id,
             is_shared=False,
             sort_order=0,
         ),
@@ -339,6 +371,7 @@ def seed_connections(db) -> None:
             projects=[order_service],
             environments=[test_env],
             type=database,
+            group_id=project_group.id,
             is_shared=False,
             sort_order=1,
         ),
@@ -349,6 +382,7 @@ def seed_connections(db) -> None:
             projects=[order_service],
             environments=[test_env, dev_env],
             type=github,
+            group_id=project_group.id,
             is_shared=False,
             sort_order=2,
         ),
@@ -357,9 +391,134 @@ def seed_connections(db) -> None:
     db.commit()
 
 
+def migrate_subscription_github_branch() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("subscriptions"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("subscriptions")}
+    if "github_branch" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE subscriptions ADD COLUMN github_branch VARCHAR(128) NULL"))
+
+
+def seed_gitlab_label(db) -> None:
+    exists = (
+        db.query(DictItem)
+        .filter(DictItem.dict_type == DICT_LABEL, DictItem.name == "GitLab 仓库")
+        .first()
+    )
+    if exists:
+        return
+    db.add(
+        DictItem(
+            dict_type=DICT_LABEL,
+            name="GitLab 仓库",
+            description="GitLab 代码仓库",
+            sort_order=3,
+        )
+    )
+    db.commit()
+
+
+def migrate_subscription_link_enabled() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("subscriptions"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("subscriptions")}
+    with engine.begin() as conn:
+        if "link_enabled" not in cols:
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN link_enabled JSON NULL"))
+        conn.execute(
+            text("UPDATE subscriptions SET link_enabled = CAST('{}' AS JSON) WHERE link_enabled IS NULL")
+        )
+
+
+def migrate_dict_is_system() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("dict_items"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("dict_items")}
+    if "is_system" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE dict_items ADD COLUMN is_system BOOLEAN NOT NULL DEFAULT 0"))
+
+
+def migrate_connection_group_id() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("connections"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("connections")}
+    if "group_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE connections ADD COLUMN group_id INT NULL"))
+        conn.execute(text("CREATE INDEX ix_connections_group_id ON connections (group_id)"))
+
+
+def seed_connection_groups(db) -> None:
+    project_group = (
+        db.query(DictItem)
+        .filter(
+            DictItem.dict_type == DICT_CONNECTION_GROUP,
+            DictItem.is_system.is_(True),
+        )
+        .first()
+    )
+    if not project_group:
+        project_group = DictItem(
+            dict_type=DICT_CONNECTION_GROUP,
+            name=PROJECT_CONNECTION_GROUP_NAME,
+            description="按项目与环境筛选的连接",
+            sort_order=0,
+            is_system=True,
+        )
+        db.add(project_group)
+        db.flush()
+
+    shared_group = (
+        db.query(DictItem)
+        .filter(
+            DictItem.dict_type == DICT_CONNECTION_GROUP,
+            DictItem.name == "共用连接",
+        )
+        .first()
+    )
+    if not shared_group:
+        shared_group = DictItem(
+            dict_type=DICT_CONNECTION_GROUP,
+            name="共用连接",
+            description="所有项目环境可见",
+            sort_order=1,
+            is_system=False,
+        )
+        db.add(shared_group)
+        db.flush()
+
+    db.commit()
+    db.refresh(project_group)
+    db.refresh(shared_group)
+
+    connections = db.query(Connection).all()
+    changed = False
+    for conn in connections:
+        if conn.group_id:
+            continue
+        if conn.is_shared:
+            conn.group_id = shared_group.id
+        else:
+            conn.group_id = project_group.id
+        changed = True
+    if changed:
+        db.commit()
+
+
 def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
+    migrate_dict_is_system()
+    migrate_connection_group_id()
     migrate_connection_multi_select()
     migrate_connection_reachability()
     migrate_connection_data_fix()
@@ -368,10 +527,17 @@ def init_db() -> None:
     migrate_connection_sub_links()
     migrate_connection_dict_ids()
     migrate_drop_dict_name_unique()
+    migrate_subscription_github_branch()
+    migrate_subscription_link_enabled()
     db = SessionLocal()
     try:
         seed_dict_items(db)
+        seed_gitlab_label(db)
+        seed_connection_groups(db)
         seed_connections(db)
+        from app.repo_access_service import sync_repo_access_cache_from_db
+
+        sync_repo_access_cache_from_db(db)
     finally:
         db.close()
 

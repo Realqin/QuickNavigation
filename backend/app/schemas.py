@@ -13,7 +13,7 @@ class DictItemBase(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, value: str) -> str:
-        allowed = {"project", "environment", "label"}
+        allowed = {"project", "environment", "label", "connection_group"}
         if value not in allowed:
             raise ValueError(f"type 必须是 {', '.join(sorted(allowed))}")
         return value
@@ -34,7 +34,7 @@ class DictItemUpdate(BaseModel):
     def validate_type(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        allowed = {"project", "environment", "label"}
+        allowed = {"project", "environment", "label", "connection_group"}
         if value not in allowed:
             raise ValueError(f"type 必须是 {', '.join(sorted(allowed))}")
         return value
@@ -46,6 +46,7 @@ class DictItemOut(BaseModel):
     name: str
     description: str | None
     sort_order: int
+    is_system: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -59,6 +60,7 @@ class DictItemOut(BaseModel):
             name=item.name,
             description=item.description,
             sort_order=item.sort_order,
+            is_system=bool(getattr(item, "is_system", False)),
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
@@ -78,6 +80,7 @@ class ConnectionBase(BaseModel):
     projects: list[int] = Field(default_factory=list)
     environments: list[int] = Field(default_factory=list)
     type: int = Field(default=1)
+    group_id: int | None = None
     is_shared: bool = False
     sort_order: int = 0
     icon: str | None = None
@@ -133,21 +136,14 @@ class ConnectionBase(BaseModel):
 
 
 class ConnectionCreate(ConnectionBase):
-    @field_validator("environments")
-    @classmethod
-    def validate_scope(cls, environments: list[int], info):
-        data = info.data
-        if not data.get("is_shared") and not environments:
-            raise ValueError("非共用连接至少选择一个环境")
-        return environments
+    group_id: int
 
-    @field_validator("projects")
+    @field_validator("group_id", mode="before")
     @classmethod
-    def validate_projects(cls, projects: list[int], info):
-        data = info.data
-        if not data.get("is_shared") and not projects:
-            raise ValueError("非共用连接至少选择一个项目")
-        return projects
+    def validate_group_id(cls, value: Any) -> int:
+        if value is None or value == "":
+            raise ValueError("请选择连接分组")
+        return int(value)
 
 
 class ConnectionUpdate(BaseModel):
@@ -157,6 +153,7 @@ class ConnectionUpdate(BaseModel):
     projects: list[int] | None = None
     environments: list[int] | None = None
     type: int | None = None
+    group_id: int | None = None
     is_shared: bool | None = None
     sort_order: int | None = None
     icon: str | None = None
@@ -205,17 +202,28 @@ class BatchDeleteRequest(BaseModel):
     ids: list[int] = Field(min_length=1)
 
 
+class HomeGroupOut(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    sort_order: int
+    is_system: bool = False
+    is_project_group: bool = False
+    connections: list["ConnectionOut"] = Field(default_factory=list)
+
+
 class HomeResponse(BaseModel):
-    shared: list[ConnectionOut]
-    scoped: list[ConnectionOut]
+    groups: list[HomeGroupOut]
     projects: list[DictItemOut]
     environments: list[DictItemOut]
     labels: list[DictItemOut]
+    connection_groups: list[DictItemOut] = Field(default_factory=list)
 
 
 class SubscriptionBase(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     github_repo: str | None = None
+    github_branch: str | None = None
     github_events: list[str] | None = None
     db_filter: dict[str, Any] | None = None
     notify_homepage: bool = True
@@ -228,9 +236,32 @@ class SubscriptionCreate(SubscriptionBase):
 class SubscriptionUpdate(BaseModel):
     enabled: bool | None = None
     github_repo: str | None = None
+    github_branch: str | None = None
     github_events: list[str] | None = None
     db_filter: dict[str, Any] | None = None
     notify_homepage: bool | None = None
+    link_enabled: dict[str, bool] | None = None
+
+
+class GitlabSubscriptionLinkOut(BaseModel):
+    link_key: str
+    name: str
+    url: str
+    branch: str
+    repo_path: str = ""
+    enabled: bool
+    link_kind: str = "gitlab"
+    webhook_secret: str | None = None
+
+
+class GitlabSubscriptionTreeOut(BaseModel):
+    id: int
+    connection_id: int
+    connection_name: str
+    connection_type_name: str | None = None
+    project_display: str
+    environment_display: str
+    links: list[GitlabSubscriptionLinkOut]
 
 
 class SubscriptionOut(SubscriptionBase):
@@ -238,10 +269,30 @@ class SubscriptionOut(SubscriptionBase):
     connection_id: int
     webhook_secret: str
     webhook_url: str | None = None
+    connection_name: str | None = None
+    connection_url: str | None = None
+    connection_type_name: str | None = None
+    provider: str | None = None
+    project_display: str | None = None
+    environment_display: str | None = None
+    branch_display: str | None = None
+    repo_web_url: str | None = None
+    repo_base_url: str | None = None
+    projects: list[int] = Field(default_factory=list)
+    environments: list[int] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ActivityLogDiffOut(BaseModel):
+    log_id: int
+    commit_sha: str | None
+    diff: str
+    repo: str | None = None
+    branch: str | None = None
+    provider: str | None = None
 
 
 class ActivityLogOut(BaseModel):
@@ -270,3 +321,72 @@ class DatabaseWebhookPayload(BaseModel):
     rows_affected: int | None = None
     sql_preview: str | None = None
     author: str | None = None
+
+
+class SchemaMonitorConfigUpdate(BaseModel):
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = None
+    password: str | None = None
+    include_databases: list[str] | None = None
+    exclude_databases: list[str] | None = None
+
+
+class SchemaMonitorPingRequest(BaseModel):
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = None
+    password: str | None = None
+
+
+class SchemaMonitorPingOut(BaseModel):
+    ok: bool
+    message: str
+    latency_ms: float | None = None
+
+
+class SchemaMonitorOut(BaseModel):
+    subscription_id: int
+    enabled: bool
+    host: str | None = None
+    port: int = 3306
+    username: str | None = None
+    password_set: bool = False
+    connection_configured: bool = False
+    include_databases: list[str] = Field(default_factory=list)
+    exclude_databases: list[str] = Field(default_factory=list)
+    interval_seconds: int
+    last_scan_at: datetime | None = None
+    last_error: str | None = None
+    has_baseline: bool = False
+    database_count: int = 0
+    table_count: int = 0
+
+
+class SchemaScanResultOut(BaseModel):
+    subscription_id: int
+    changes_detected: int
+    logs_created: int
+    has_baseline: bool
+    message: str
+
+
+class PublicConfigOut(BaseModel):
+    webhook_base_url: str
+
+
+class RepoAccessSettingsOut(BaseModel):
+    gitlab_base_url: str
+    gitlab_token_set: bool
+    gitlab_token_hint: str | None = None
+    github_token_set: bool
+    github_token_hint: str | None = None
+    public_webhook_base_url: str
+    updated_at: datetime | None = None
+
+
+class RepoAccessSettingsUpdate(BaseModel):
+    gitlab_base_url: str | None = None
+    gitlab_token: str | None = None
+    github_token: str | None = None
+    public_webhook_base_url: str | None = None

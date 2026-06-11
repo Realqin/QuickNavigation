@@ -47,10 +47,16 @@ export function useDictGroup() {
   const projects = useDict('project');
   const environments = useDict('environment');
   const labels = useDict('label');
+  const connectionGroups = useDict('connection_group');
 
   const reloadAll = useCallback(async () => {
-    await Promise.all([projects.reload(), environments.reload(), labels.reload()]);
-  }, [projects, environments, labels]);
+    await Promise.all([
+      projects.reload(),
+      environments.reload(),
+      labels.reload(),
+      connectionGroups.reload(),
+    ]);
+  }, [projects, environments, labels, connectionGroups]);
 
-  return { projects, environments, labels, reloadAll };
+  return { projects, environments, labels, connectionGroups, reloadAll };
 }

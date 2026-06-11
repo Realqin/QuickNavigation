@@ -17,7 +17,7 @@ import { createDictItem, deleteDictItem, fetchDictItems, updateDictItem } from '
 import type { DictFormValues, DictItem, DictType } from '../types';
 import { DICT_TYPE_LABELS } from '../types';
 
-const DICT_TYPES: DictType[] = ['project', 'environment', 'label'];
+const DICT_TYPES: DictType[] = ['project', 'environment', 'label', 'connection_group'];
 const PAGE_SIZE = 10;
 
 export default function DictPage() {
@@ -128,6 +128,16 @@ export default function DictPage() {
             render: (_value, _record, index) => (page - 1) * PAGE_SIZE + index + 1,
           },
           { title: '名称', dataIndex: 'name', ellipsis: true },
+          ...(activeType === 'connection_group'
+            ? [
+                {
+                  title: '系统默认',
+                  dataIndex: 'is_system',
+                  width: 96,
+                  render: (v: boolean | undefined) => (v ? '是' : '否'),
+                },
+              ]
+            : []),
           { title: '描述', dataIndex: 'description', ellipsis: true, render: (v) => v || '-' },
           { title: '排序', dataIndex: 'sort_order', width: 80 },
           {
@@ -136,9 +146,11 @@ export default function DictPage() {
             render: (_, record) => (
               <Space>
                 <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
-                <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
-                  <Button size="small" danger icon={<DeleteOutlined />} />
-                </Popconfirm>
+                {record.is_system ? null : (
+                  <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
+                    <Button size="small" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                )}
               </Space>
             ),
           },
@@ -160,7 +172,7 @@ export default function DictPage() {
             <Input />
           </Form.Item>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input placeholder="如：测试环境" />
+            <Input placeholder="如：测试环境" disabled={!!editing?.is_system} />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="可选说明" />

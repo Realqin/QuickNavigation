@@ -5,7 +5,7 @@ export interface SubLink {
   last_checked_at?: string | null;
 }
 
-export type DictType = 'project' | 'environment' | 'label';
+export type DictType = 'project' | 'environment' | 'label' | 'connection_group';
 
 export interface DictItem {
   id: number;
@@ -13,6 +13,7 @@ export interface DictItem {
   name: string;
   description?: string | null;
   sort_order: number;
+  is_system?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -25,6 +26,7 @@ export interface Connection {
   projects: number[];
   environments: number[];
   type: number;
+  group_id?: number | null;
   is_shared: boolean;
   sort_order: number;
   icon?: string | null;
@@ -41,12 +43,22 @@ export interface ConnectionPingResult {
   last_checked_at: string;
 }
 
+export interface HomeGroup {
+  id: number;
+  name: string;
+  description?: string | null;
+  sort_order: number;
+  is_system: boolean;
+  is_project_group: boolean;
+  connections: Connection[];
+}
+
 export interface HomeData {
-  shared: Connection[];
-  scoped: Connection[];
+  groups: HomeGroup[];
   projects: DictItem[];
   environments: DictItem[];
   labels: DictItem[];
+  connection_groups: DictItem[];
 }
 
 export interface ActivityLog {
@@ -64,16 +76,68 @@ export interface ActivityLog {
   is_read: boolean;
 }
 
+export interface ActivityLogDiff {
+  log_id: number;
+  commit_sha?: string | null;
+  diff: string;
+  repo?: string | null;
+  branch?: string | null;
+  provider?: string | null;
+}
+
+export interface GitlabSubscriptionLink {
+  link_key: string;
+  name: string;
+  url: string;
+  branch: string;
+  repo_path?: string;
+  enabled: boolean;
+  link_kind?: 'gitlab' | 'database';
+  webhook_secret?: string | null;
+}
+
+export interface GitlabSubscriptionTree {
+  id: number;
+  connection_id: number;
+  connection_name: string;
+  connection_type_name?: string | null;
+  project_display: string;
+  environment_display: string;
+  links: GitlabSubscriptionLink[];
+}
+
+export interface RepoAccessSettings {
+  gitlab_base_url: string;
+  gitlab_token_set: boolean;
+  gitlab_token_hint?: string | null;
+  github_token_set: boolean;
+  github_token_hint?: string | null;
+  public_webhook_base_url: string;
+  updated_at?: string | null;
+}
+
 export interface Subscription {
   id: number;
   connection_id: number;
   enabled: boolean;
   github_repo?: string | null;
+  github_branch?: string | null;
   github_events?: string[] | null;
   db_filter?: Record<string, unknown> | null;
   notify_homepage: boolean;
   webhook_secret: string;
   webhook_url?: string | null;
+  connection_name?: string | null;
+  connection_url?: string | null;
+  connection_type_name?: string | null;
+  provider?: string | null;
+  project_display?: string | null;
+  environment_display?: string | null;
+  branch_display?: string | null;
+  repo_web_url?: string | null;
+  repo_base_url?: string | null;
+  projects?: number[];
+  environments?: number[];
   created_at: string;
   updated_at: string;
 }
@@ -85,7 +149,7 @@ export interface ConnectionFormValues {
   projects: number[];
   environments: number[];
   type: number;
-  is_shared: boolean;
+  group_id: number;
   sub_links?: SubLink[];
 }
 
@@ -96,8 +160,47 @@ export interface DictFormValues {
   sort_order: number;
 }
 
+export interface PublicConfig {
+  webhook_base_url: string;
+}
+
+export interface SchemaMonitorStatus {
+  subscription_id: number;
+  enabled: boolean;
+  host?: string | null;
+  port: number;
+  username?: string | null;
+  password_set: boolean;
+  connection_configured: boolean;
+  include_databases: string[];
+  exclude_databases: string[];
+  interval_seconds: number;
+  last_scan_at?: string | null;
+  last_error?: string | null;
+  has_baseline: boolean;
+  database_count: number;
+  table_count: number;
+}
+
+export interface SchemaMonitorPingResult {
+  ok: boolean;
+  message: string;
+  latency_ms?: number | null;
+}
+
+export interface SchemaScanResult {
+  subscription_id: number;
+  changes_detected: number;
+  logs_created: number;
+  has_baseline: boolean;
+  message: string;
+}
+
+export const PROJECT_CONNECTION_GROUP_NAME = '项目连接';
+
 export const DICT_TYPE_LABELS: Record<DictType, string> = {
   project: '项目',
   environment: '环境',
   label: '类型',
+  connection_group: '连接分组',
 };

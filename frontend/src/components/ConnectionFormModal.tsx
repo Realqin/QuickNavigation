@@ -1,7 +1,7 @@
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, Modal, Select, Space, Switch, Typography } from 'antd';
-import { useEffect } from 'react';
-import type { Connection, ConnectionFormValues } from '../types';
+import { Button, Form, Input, Modal, Select, Space, Typography } from 'antd';
+import { useEffect, useMemo } from 'react';
+import type { Connection, ConnectionFormValues, DictItem } from '../types';
 
 interface SelectOption {
   label: string;
@@ -14,9 +14,12 @@ interface Props {
   projectOptions: SelectOption[];
   environmentOptions: SelectOption[];
   labelOptions: SelectOption[];
+  groupOptions: SelectOption[];
+  groupItems: DictItem[];
   defaultProjects?: number[];
   defaultEnvironments?: number[];
   defaultType?: number;
+  defaultGroupId?: number;
   onCancel: () => void;
   onSubmit: (values: ConnectionFormValues) => Promise<void>;
 }
@@ -27,13 +30,21 @@ export default function ConnectionFormModal({
   projectOptions,
   environmentOptions,
   labelOptions,
+  groupOptions,
+  groupItems,
   defaultProjects,
   defaultEnvironments,
   defaultType,
+  defaultGroupId,
   onCancel,
   onSubmit,
 }: Props) {
   const [form] = Form.useForm<ConnectionFormValues>();
+
+  const projectGroupId = useMemo(
+    () => groupItems.find((item) => item.is_system)?.id,
+    [groupItems],
+  );
 
   useEffect(() => {
     if (open) {
@@ -45,7 +56,7 @@ export default function ConnectionFormModal({
           projects: connection.projects ?? [],
           environments: connection.environments ?? [],
           type: connection.type,
-          is_shared: connection.is_shared,
+          group_id: connection.group_id ?? projectGroupId,
           sub_links: connection.sub_links ?? [],
         });
       } else {
@@ -62,7 +73,7 @@ export default function ConnectionFormModal({
               ? [environmentOptions[0].value]
               : [],
           type: defaultType ?? labelOptions[0]?.value,
-          is_shared: false,
+          group_id: defaultGroupId ?? projectGroupId ?? groupOptions[0]?.value,
           sub_links: [],
         });
       }
@@ -74,9 +85,12 @@ export default function ConnectionFormModal({
     projectOptions,
     environmentOptions,
     labelOptions,
+    groupOptions,
+    projectGroupId,
     defaultProjects,
     defaultEnvironments,
     defaultType,
+    defaultGroupId,
   ]);
 
   const handleOk = async () => {
@@ -110,12 +124,16 @@ export default function ConnectionFormModal({
         <Form.Item name="description" label="描述">
           <Input.TextArea rows={2} placeholder="可选描述" />
         </Form.Item>
-        <Form.Item name="is_shared" label="共用连接" valuePropName="checked">
-          <Switch checkedChildren="是" unCheckedChildren="否" />
+        <Form.Item
+          name="group_id"
+          label="分组"
+          rules={[{ required: true, message: '请选择分组' }]}
+        >
+          <Select options={groupOptions} placeholder="选择连接分组" />
         </Form.Item>
-        <Form.Item noStyle shouldUpdate={(prev, cur) => prev.is_shared !== cur.is_shared}>
+        <Form.Item noStyle shouldUpdate={(prev, cur) => prev.group_id !== cur.group_id}>
           {({ getFieldValue }) =>
-            !getFieldValue('is_shared') ? (
+            getFieldValue('group_id') === projectGroupId ? (
               <>
                 <Form.Item
                   name="projects"

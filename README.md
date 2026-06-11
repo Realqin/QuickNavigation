@@ -41,11 +41,17 @@ docker compose up -d --build
 
 ### 3. 日志订阅
 
-- GitHub：在「日志订阅」页为 github 类型连接创建订阅，配置 Webhook 指向：
+- GitHub / GitLab：在「日志订阅」页复制 Webhook 地址。须配置 `PUBLIC_WEBHOOK_BASE_URL` 为 **GitLab 服务器能访问** 的地址，例如：
   ```
-  http://<你的内网IP>:8080/webhooks/github
+  # docker compose 部署（推荐内网）
+  PUBLIC_WEBHOOK_BASE_URL=http://192.168.6.127:8080
+  # 本地开发，GitLab 与你在同一局域网
+  PUBLIC_WEBHOOK_BASE_URL=http://192.168.6.127:8000
   ```
-- 数据库：创建订阅后复制 Webhook 地址，应用变更后 POST：
+  GitLab 项目 → Settings → Webhooks → URL 填：`http://<上述基址>/webhooks/gitlab`
+- 数据库：
+  - **结构巡检（推荐）**：日志订阅页 → 数据库连接 →「结构巡检」，填写数据库 IP、端口、账号、密码并启用。系统每 5 分钟对比 `information_schema` 快照，自动检测建库/建表/改表/删表，写入活动日志（不监听数据变更）。
+  - **Webhook 上报**：应用侧变更后 POST：
   ```json
   POST /webhooks/database?secret=<webhook_secret>
   {
@@ -82,6 +88,9 @@ QuickNavigation/
 |------|------|--------|
 | DATABASE_URL | MySQL 连接串 | docker-compose 内置 |
 | GITHUB_WEBHOOK_SECRET | GitHub 签名密钥 | change-me-github-secret |
+| GITLAB_WEBHOOK_SECRET | GitLab Secret token | change-me-gitlab-secret |
+| PUBLIC_WEBHOOK_BASE_URL | Webhook 对外基址（GitLab 可访问） | 空 |
+| SCHEMA_MONITOR_INTERVAL_SECONDS | 数据库结构巡检间隔（秒） | 300 |
 | CORS_ORIGINS | 跨域来源 | * |
 
 生产部署前请修改 `docker-compose.yml` 中的数据库密码和 `GITHUB_WEBHOOK_SECRET`。
@@ -106,7 +115,13 @@ pip install -r requirements.txt
 # 复制环境变量（可选，默认已指向 127.0.0.1:3309）
 copy .env.example .env
 
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+在 `backend/.env` 中设置（把 IP 换成你本机局域网地址）：
+
+```env
+PUBLIC_WEBHOOK_BASE_URL=http://192.168.6.127:8000
 ```
 
 **前端：**
@@ -117,7 +132,17 @@ npm install
 npm run dev
 ```
 
-Vite 开发服务器已配置代理到 `localhost:8000`。
+Vite 已开启 `--host`，局域网可通过 `http://192.168.6.127:5173` 访问页面；**Webhook 仍应指向后端 8000 或 Docker 8080**，不要填 5173（除非仅作临时联调且 GitLab 能访问该地址）。
+
+### 网络说明
+
+| 场景 | 浏览器访问 | GitLab Webhook 填 |
+|------|-----------|------------------|
+| Docker 全栈 | `http://192.168.6.127:8080` | `http://192.168.6.127:8080/webhooks/gitlab` |
+| 本地开发 | `http://192.168.6.127:5173` | `http://192.168.6.127:8000/webhooks/gitlab` |
+| GitLab.com 公网 | 需公网域名或内网穿透 | `https://你的域名/webhooks/gitlab` |
+
+若 `192.168.6.127:5173` 仍打不开，检查：① 前后端是否已启动；② Windows 防火墙是否放行 5173/8000/8080；③ 是否用了 `--host` / `0.0.0.0` 监听。
 
 ## 架构图
 

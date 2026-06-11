@@ -135,7 +135,7 @@ export default function ConnectionCard({
           </div>
           <div className="connection-card__tags" onClick={(e) => e.stopPropagation()}>
             <TypeTag label={displayType} colorKey={typeColor} />
-            {!connection.is_shared && (
+            {!connection.projects?.length ? null : (
               <>
                 {projectLabels.map((item) => (
                   <Tag key={`p-${item}`}>{item}</Tag>

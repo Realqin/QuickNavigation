@@ -1,17 +1,38 @@
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.database import get_db
-from app.models import Connection, Subscription
+from app.models import Subscription
+from app.repo_service import (
+    gitlab_repo_path,
+    push_branch,
+    repos_match,
+    schedule_log_diff,
+    short_sha,
+    subscription_branch,
+    subscription_provider,
+    subscription_repo_candidates,
+)
 from app.schemas import ActivityLogOut, DatabaseWebhookPayload
-from app.services import create_activity_log, handle_database_webhook, _primary_project_environment
+from app.services import (
+    build_gitlab_subscription_links,
+    create_activity_log,
+    handle_database_webhook,
+    match_gitlab_link,
+    refresh_subscription_from_connection,
+    _primary_project_environment,
+)
 from app.websocket_manager import ws_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -27,9 +48,166 @@ def _verify_github_signature(body: bytes, signature: str | None) -> bool:
     return hmac.compare_digest(f"sha256={expected}", signature)
 
 
+def _verify_gitlab_token(token: str | None) -> bool:
+    secret = settings.gitlab_webhook_secret.strip()
+    if not secret or secret == "change-me-gitlab-secret":
+        return True
+    return bool(token and token == secret)
+
+
 async def _broadcast_log(log: Any) -> None:
     data = ActivityLogOut.model_validate(log).model_dump(mode="json")
     await ws_manager.broadcast({"type": "log:new", "data": data})
+
+
+def _match_subscription(
+    sub: Subscription,
+    repo_full_name: str | None,
+    branch: str,
+    event: str,
+    provider: str,
+) -> bool:
+    if not sub.enabled:
+        return False
+    sub_provider = subscription_provider(sub)
+    if sub_provider and sub_provider != provider:
+        return False
+    repo_candidates = subscription_repo_candidates(sub)
+    if not repo_candidates or not repo_full_name:
+        return False
+    if not any(repos_match(candidate, repo_full_name) for candidate in repo_candidates):
+        return False
+    if sub.github_events and event not in sub.github_events:
+        return False
+    expected_branch = subscription_branch(sub)
+    if expected_branch and expected_branch != branch:
+        return False
+    return True
+
+
+def _is_zero_sha(sha: str | None) -> bool:
+    if not sha:
+        return True
+    return sha.strip("0") == ""
+
+
+def _normalize_commits(commits: list[dict[str, Any]], fallback_sha: str | None = None) -> list[dict[str, Any]]:
+    if commits:
+        return commits
+    if fallback_sha and not _is_zero_sha(fallback_sha):
+        return [{"id": fallback_sha, "message": "Push event", "author": {"name": None}}]
+    return []
+
+
+def _commit_timestamp(commit: dict[str, Any]) -> str | None:
+    for key in ("timestamp", "committed_date", "authored_date", "created_at"):
+        ts = commit.get(key)
+        if isinstance(ts, str) and ts.strip():
+            return ts.strip()
+    return None
+
+
+async def _handle_push_event(
+    db: Session,
+    *,
+    provider: str,
+    repo_full_name: str,
+    branch: str,
+    commits: list[dict[str, Any]],
+    source_type: str,
+) -> list[Any]:
+    logs: list[Any] = []
+    subs = (
+        db.query(Subscription)
+        .options(joinedload(Subscription.connection))
+        .all()
+    )
+    for sub in subs:
+        refresh_subscription_from_connection(db, sub)
+        conn = sub.connection
+        if not conn:
+            continue
+
+        if provider == "gitlab":
+            matched = any(
+                match_gitlab_link(link, repo_full_name, branch)
+                for link in build_gitlab_subscription_links(conn, sub.link_enabled)
+            )
+            if not matched:
+                continue
+        elif not _match_subscription(sub, repo_full_name, branch, "push", provider):
+            continue
+
+        project, environment = _primary_project_environment(db, conn)
+        for commit in commits:
+            if commit.get("distinct") is False:
+                continue
+            sha = commit.get("id")
+            if not sha or _is_zero_sha(sha):
+                continue
+            message = (commit.get("message") or "Push commit").split("\n")[0]
+            author_info = commit.get("author") or {}
+            author = author_info.get("name") if isinstance(author_info, dict) else None
+            if not author:
+                author = commit.get("author_name")
+            log = create_activity_log(
+                db,
+                subscription_id=sub.id,
+                connection_id=conn.id,
+                project=project,
+                environment=environment,
+                source_type=source_type,
+                title=f"Push · {branch} · {short_sha(sha)}",
+                summary=message,
+                payload={
+                    "event": "push",
+                    "provider": provider,
+                    "repo": repo_full_name,
+                    "branch": branch,
+                    "commit_sha": sha,
+                    "committed_at": _commit_timestamp(commit),
+                    "commit_url": commit.get("url"),
+                    "files": {
+                        "added": commit.get("added") or [],
+                        "removed": commit.get("removed") or [],
+                        "modified": commit.get("modified") or [],
+                    },
+                    "diff": "",
+                },
+                author=author,
+            )
+            logs.append(log)
+            schedule_log_diff(log.id, provider, repo_full_name, sha)
+
+    if not logs:
+        logger.warning(
+            "Push ignored: no matching subscription for provider=%s repo=%s branch=%s commits=%s",
+            provider,
+            repo_full_name,
+            branch,
+            len(commits),
+        )
+
+    for log in logs:
+        asyncio.create_task(_broadcast_log(log))
+    return logs
+
+
+def _push_response(logs: list[Any], *, provider: str, repo: str, branch: str, commits: int) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "ok": True,
+        "log_ids": [log.id for log in logs],
+        "count": len(logs),
+        "repo": repo,
+        "branch": branch,
+        "commits": commits,
+    }
+    if not logs:
+        body["hint"] = (
+            "未写入活动日志：请确认已在「日志订阅」创建并启用订阅，"
+            "且连接的 GitLab 地址与推送仓库、分支一致（订阅表中的「仓库」「分支」列）。"
+        )
+    return body
 
 
 @router.post("/github")
@@ -45,75 +223,48 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
     payload = json.loads(body)
     repo_full_name = payload.get("repository", {}).get("full_name")
 
-    subs = (
-        db.query(Subscription)
-        .filter(
-            Subscription.enabled.is_(True),
-            Subscription.github_repo.isnot(None),
-            Subscription.github_repo != "",
+    if event == "push" and repo_full_name:
+        branch = push_branch(payload)
+        commits = _normalize_commits(payload.get("commits") or [], payload.get("after"))
+        logs = await _handle_push_event(
+            db,
+            provider="github",
+            repo_full_name=repo_full_name,
+            branch=branch,
+            commits=commits,
+            source_type="github",
         )
-        .all()
-    )
+        return _push_response(logs, provider="github", repo=repo_full_name, branch=branch, commits=len(commits))
 
-    matched = None
-    for sub in subs:
-        if sub.github_repo and repo_full_name and sub.github_repo == repo_full_name:
-            if sub.github_events and event not in sub.github_events:
-                continue
-            matched = sub
-            break
+    return {"ok": True, "message": "Event ignored"}
 
-    if not matched:
-        return {"ok": True, "message": "No matching subscription"}
 
-    conn = matched.connection
-    title, summary, author = _parse_github_event(event, payload)
-    project, environment = _primary_project_environment(db, conn)
+@router.post("/gitlab")
+async def gitlab_webhook(request: Request, db: Session = Depends(get_db)):
+    token = request.headers.get("X-Gitlab-Token")
+    if not _verify_gitlab_token(token):
+        raise HTTPException(status_code=401, detail="Invalid GitLab token")
 
-    log = create_activity_log(
+    payload = json.loads(await request.body())
+    object_kind = payload.get("object_kind")
+    if object_kind != "push":
+        return {"ok": True, "message": f"Event ignored: {object_kind}"}
+
+    repo_full_name = gitlab_repo_path(payload)
+    if not repo_full_name:
+        return {"ok": True, "message": "Missing project path"}
+
+    branch = push_branch(payload)
+    commits = _normalize_commits(payload.get("commits") or [], payload.get("after"))
+    logs = await _handle_push_event(
         db,
-        subscription_id=matched.id,
-        connection_id=conn.id,
-        project=project,
-        environment=environment,
-        source_type="github",
-        title=title,
-        summary=summary,
-        payload={"event": event, "repo": repo_full_name},
-        author=author,
+        provider="gitlab",
+        repo_full_name=repo_full_name,
+        branch=branch,
+        commits=commits,
+        source_type="gitlab",
     )
-    await _broadcast_log(log)
-    return {"ok": True, "log_id": log.id}
-
-
-def _parse_github_event(event: str, payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
-    if event == "push":
-        ref = payload.get("ref", "")
-        branch = ref.split("/")[-1] if ref else "unknown"
-        commits = payload.get("commits", [])
-        if commits:
-            last = commits[-1]
-            msg = last.get("message", "push event")
-            author = last.get("author", {}).get("name")
-            return f"Push to {branch}", msg.split("\n")[0], author
-        pusher = payload.get("pusher", {}).get("name")
-        return f"Push to {branch}", None, pusher
-
-    if event == "pull_request":
-        action = payload.get("action", "updated")
-        pr = payload.get("pull_request", {})
-        title = pr.get("title", "Pull Request")
-        user = pr.get("user", {}).get("login")
-        return f"PR {action}: {title}", pr.get("body", "")[:200] if pr.get("body") else None, user
-
-    if event == "release":
-        release = payload.get("release", {})
-        tag = release.get("tag_name", "release")
-        author = release.get("author", {}).get("login")
-        return f"Release {tag}", release.get("name"), author
-
-    sender = payload.get("sender", {}).get("login")
-    return f"GitHub {event}", None, sender
+    return _push_response(logs, provider="gitlab", repo=repo_full_name, branch=branch, commits=len(commits))
 
 
 @router.post("/database")

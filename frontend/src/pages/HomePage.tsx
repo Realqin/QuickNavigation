@@ -13,9 +13,17 @@ import {
 } from '../api';
 import ActivityLogPanel from '../components/ActivityLogPanel';
 import ConnectionFormModal from '../components/ConnectionFormModal';
+import SchemaChangeModal from '../components/SchemaChangeModal';
 import ConnectionSection from '../components/ConnectionSection';
-import { buildLabelColorMap, buildLabelIconIndexMap, buildLabelOrderMap, dictToOptions, useDict } from '../hooks/useDict';
-import type { ActivityLog, Connection, ConnectionFormValues } from '../types';
+import {
+  buildLabelColorMap,
+  buildLabelIconIndexMap,
+  buildLabelOrderMap,
+  dictToOptions,
+  useDict,
+} from '../hooks/useDict';
+import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
+import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
 const { Content, Sider } = Layout;
 
@@ -30,30 +38,39 @@ function loadStorageNumber(key: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function loadGroupExpanded(groupId: number): boolean {
+  return localStorage.getItem(`${EXPAND_KEY}-group-${groupId}`) !== 'false';
+}
+
 export default function HomePage() {
   const { items: projectItems, options: projectOptions, idMap: projectIdMap } = useDict('project');
   const { items: envItems, options: environmentOptions, idMap: envIdMap } = useDict('environment');
   const { items: labelItems, options: labelOptions, idMap: labelIdMap } = useDict('label');
+  const {
+    items: groupItems,
+    options: groupOptions,
+  } = useDict('connection_group');
 
   const labelColorMap = useMemo(() => buildLabelColorMap(labelItems), [labelItems]);
   const labelOrderMap = useMemo(() => buildLabelOrderMap(labelItems), [labelItems]);
   const labelIconIndexMap = useMemo(() => buildLabelIconIndexMap(labelItems), [labelItems]);
 
+  const projectGroupId = useMemo(
+    () => groupItems.find((item) => item.is_system)?.id,
+    [groupItems],
+  );
+
   const [project, setProject] = useState<number | null>(() => loadStorageNumber(PROJECT_KEY));
   const [environment, setEnvironment] = useState<number | null>(() => loadStorageNumber(ENV_KEY));
-  const [shared, setShared] = useState<Connection[]>([]);
-  const [scoped, setScoped] = useState<Connection[]>([]);
+  const [groups, setGroups] = useState<HomeGroup[]>([]);
+  const [expandedMap, setExpandedMap] = useState<Record<number, boolean>>({});
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
-  const [sharedExpanded, setSharedExpanded] = useState(
-    () => localStorage.getItem(`${EXPAND_KEY}-shared`) !== 'false',
-  );
-  const [scopedExpanded, setScopedExpanded] = useState(
-    () => localStorage.getItem(`${EXPAND_KEY}-scoped`) !== 'false',
-  );
+  const [schemaChangeLog, setSchemaChangeLog] = useState<ActivityLog | null>(null);
+  const [schemaChangeOpen, setSchemaChangeOpen] = useState(false);
 
   const resolvedProject = useMemo(() => {
     if (project && projectOptions.some((o) => o.value === project)) return project;
@@ -73,8 +90,16 @@ export default function HomePage() {
         fetchHome(resolvedProject, resolvedEnvironment),
         fetchLogs({ project: resolvedProject, environment: resolvedEnvironment, limit: 50 }),
       ]);
-      setShared(home.shared);
-      setScoped(home.scoped);
+      setGroups(home.groups);
+      setExpandedMap((prev) => {
+        const next = { ...prev };
+        home.groups.forEach((group) => {
+          if (next[group.id] === undefined) {
+            next[group.id] = loadGroupExpanded(group.id);
+          }
+        });
+        return next;
+      });
       setLogs(logList);
     } catch {
       message.error('加载数据失败');
@@ -112,13 +137,28 @@ export default function HomePage() {
 
   const handleExpandChange = (key: string, expanded: boolean) => {
     localStorage.setItem(`${EXPAND_KEY}-${key}`, String(expanded));
-    if (key === 'shared') setSharedExpanded(expanded);
-    if (key === 'scoped') setScopedExpanded(expanded);
+    const groupId = Number(key.replace('group-', ''));
+    if (Number.isFinite(groupId)) {
+      setExpandedMap((prev) => ({ ...prev, [groupId]: expanded }));
+    }
   };
 
-  const applyReorder = async (scope: string, list: Connection[], setter: (v: Connection[]) => void) => {
+  const updateGroupConnections = (groupId: number, connections: Connection[]) => {
+    setGroups((prev) =>
+      prev.map((group) => (group.id === groupId ? { ...group, connections } : group)),
+    );
+  };
+
+  const applyReorder = async (
+    scope: string,
+    groupId: number,
+    list: Connection[],
+  ) => {
     const items = list.map((item, index) => ({ id: item.id, sort_order: index }));
-    setter(list.map((item, index) => ({ ...item, sort_order: index })));
+    updateGroupConnections(
+      groupId,
+      list.map((item, index) => ({ ...item, sort_order: index })),
+    );
     try {
       await reorderConnections(scope, items);
     } catch {
@@ -145,6 +185,10 @@ export default function HomePage() {
   };
 
   const handleLogClick = async (log: ActivityLog) => {
+    if (isSchemaChangeLog(log)) {
+      setSchemaChangeLog(log);
+      setSchemaChangeOpen(true);
+    }
     if (log.is_read) return;
     try {
       const updated = await markLogRead(log.id);
@@ -168,6 +212,7 @@ export default function HomePage() {
   const selectEnvironmentOptions = environmentOptions.length
     ? environmentOptions
     : dictToOptions(envItems);
+  const selectGroupOptions = groupOptions.length ? groupOptions : dictToOptions(groupItems);
 
   const projectLabel = resolvedProject != null ? projectIdMap[resolvedProject] ?? resolvedProject : '';
   const environmentLabel =
@@ -213,7 +258,7 @@ export default function HomePage() {
               setEditing(null);
               setModalOpen(true);
             }}
-            disabled={!labelOptions.length}
+            disabled={!labelOptions.length || !selectGroupOptions.length}
           >
             新增连接
           </Button>
@@ -222,53 +267,43 @@ export default function HomePage() {
 
       <Layout className="home-layout">
         <Content className="home-content">
-          <ConnectionSection
-            title="共用连接"
-            panelKey="shared"
-            connections={shared}
-            expanded={sharedExpanded}
-            editMode={editMode}
-            onExpandChange={handleExpandChange}
-            onReorder={(list) => applyReorder('shared', list, setShared)}
-            onEdit={(conn) => {
-              setEditing(conn);
-              setModalOpen(true);
-            }}
-            onDelete={handleDelete}
-            labelIdMap={labelIdMap}
-            labelColorMap={labelColorMap}
-            labelIconIndexMap={labelIconIndexMap}
-            labelOrderMap={labelOrderMap}
-            projectIdMap={projectIdMap}
-            envIdMap={envIdMap}
-          />
-          <div style={{ height: 16 }} />
-          <ConnectionSection
-            title={`项目连接 · ${projectLabel} / ${environmentLabel}`}
-            panelKey="scoped"
-            connections={scoped}
-            expanded={scopedExpanded}
-            editMode={editMode}
-            onExpandChange={handleExpandChange}
-            onReorder={(list) =>
-              applyReorder(
-                `project:${resolvedProject}:${resolvedEnvironment}`,
-                list,
-                setScoped,
-              )
-            }
-            onEdit={(conn) => {
-              setEditing(conn);
-              setModalOpen(true);
-            }}
-            onDelete={handleDelete}
-            labelIdMap={labelIdMap}
-            labelColorMap={labelColorMap}
-            labelIconIndexMap={labelIconIndexMap}
-            labelOrderMap={labelOrderMap}
-            projectIdMap={projectIdMap}
-            envIdMap={envIdMap}
-          />
+          {groups.map((group, index) => (
+            <div key={group.id}>
+              {index > 0 ? <div style={{ height: 16 }} /> : null}
+              <ConnectionSection
+                title={
+                  group.is_project_group
+                    ? `${group.name} · ${projectLabel} / ${environmentLabel}`
+                    : group.name
+                }
+                panelKey={`group-${group.id}`}
+                connections={group.connections}
+                expanded={expandedMap[group.id] ?? true}
+                editMode={editMode}
+                onExpandChange={handleExpandChange}
+                onReorder={(list) =>
+                  applyReorder(
+                    group.is_project_group
+                      ? `group:${group.id}:project:${resolvedProject}:${resolvedEnvironment}`
+                      : `group:${group.id}`,
+                    group.id,
+                    list,
+                  )
+                }
+                onEdit={(conn) => {
+                  setEditing(conn);
+                  setModalOpen(true);
+                }}
+                onDelete={handleDelete}
+                labelIdMap={labelIdMap}
+                labelColorMap={labelColorMap}
+                labelIconIndexMap={labelIconIndexMap}
+                labelOrderMap={labelOrderMap}
+                projectIdMap={projectIdMap}
+                envIdMap={envIdMap}
+              />
+            </div>
+          ))}
         </Content>
         <Sider width={300} className="home-log-sider" theme="light">
           <ActivityLogPanel logs={logs} onItemClick={handleLogClick} />
@@ -281,13 +316,24 @@ export default function HomePage() {
         projectOptions={selectProjectOptions}
         environmentOptions={selectEnvironmentOptions}
         labelOptions={labelOptions}
+        groupOptions={selectGroupOptions}
+        groupItems={groupItems}
         defaultProjects={resolvedProject != null ? [resolvedProject] : []}
         defaultEnvironments={resolvedEnvironment != null ? [resolvedEnvironment] : []}
+        defaultGroupId={projectGroupId}
         onCancel={() => {
           setModalOpen(false);
           setEditing(null);
         }}
         onSubmit={handleSubmit}
+      />
+      <SchemaChangeModal
+        log={schemaChangeLog}
+        open={schemaChangeOpen}
+        onClose={() => {
+          setSchemaChangeOpen(false);
+          setSchemaChangeLog(null);
+        }}
       />
     </div>
   );

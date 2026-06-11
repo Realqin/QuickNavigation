@@ -1,6 +1,7 @@
 import { DatabaseOutlined, GithubOutlined } from '@ant-design/icons';
 import { Badge, List, Space, Tag, Typography } from 'antd';
 import type { ActivityLog } from '../types';
+import { formatBeijingTime } from '../utils/dateTime';
 
 interface Props {
   logs: ActivityLog[];
@@ -50,7 +51,7 @@ export default function ActivityLogPanel({ logs, onItemClick }: Props) {
                   )}
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     {item.author ? `${item.author} · ` : ''}
-                    {new Date(item.occurred_at).toLocaleString()}
+                    {formatBeijingTime(item.occurred_at)}
                   </Typography.Text>
                 </Space>
               }

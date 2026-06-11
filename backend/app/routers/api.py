@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.repo_access_config import get_public_webhook_base_url
 from app.models import Connection, DictItem, Subscription
 from app.schemas import (
+    ActivityLogDiffOut,
     ActivityLogOut,
     BatchDeleteRequest,
     ConnectionCreate,
@@ -14,33 +16,99 @@ from app.schemas import (
     DictItemCreate,
     DictItemOut,
     DictItemUpdate,
+    GitlabSubscriptionTreeOut,
     HomeResponse,
+    PublicConfigOut,
+    RepoAccessSettingsOut,
+    RepoAccessSettingsUpdate,
     ReorderRequest,
+    SchemaMonitorConfigUpdate,
+    SchemaMonitorOut,
+    SchemaMonitorPingOut,
+    SchemaMonitorPingRequest,
+    SchemaScanResultOut,
     SubscriptionCreate,
     SubscriptionOut,
     SubscriptionUpdate,
 )
 from app.services import (
+    connection_environment_display,
+    connection_project_display,
     create_connection,
     create_dict_item,
     create_subscription,
     batch_delete_connections,
+    backfill_missing_commit_times,
     delete_connection,
     delete_dict_item,
+    get_dict_label_name,
     get_home_data,
     list_activity_logs,
     list_connections,
     list_dict_items,
+    list_gitlab_subscription_trees,
+    get_activity_log,
+    get_or_fetch_log_diff,
     reorder_connections,
     reorder_dict_items,
     update_connection,
     update_dict_item,
     update_subscription,
 )
+from app.repo_access_service import get_repo_access_settings_out, update_repo_access_settings
+from app.schema_monitor_service import (
+    get_schema_monitor_status,
+    ping_schema_monitor_for_subscription,
+    scan_subscription_schema_async,
+    update_schema_monitor_config,
+)
 
 from app.ping_scheduler import ping_connection_record
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+@router.get("/public/config", response_model=PublicConfigOut)
+def public_config():
+    configured = get_public_webhook_base_url()
+    return PublicConfigOut(webhook_base_url=configured)
+
+
+@router.get("/settings/repo-access", response_model=RepoAccessSettingsOut)
+def get_repo_access_settings(db: Session = Depends(get_db)):
+    return get_repo_access_settings_out(db)
+
+
+@router.put("/settings/repo-access", response_model=RepoAccessSettingsOut)
+def put_repo_access_settings(data: RepoAccessSettingsUpdate, db: Session = Depends(get_db)):
+    return update_repo_access_settings(db, data)
+
+
+def _subscription_to_out(sub: Subscription, db: Session) -> SubscriptionOut:
+    from app.repo_service import parse_repo_url
+
+    conn = sub.connection
+    out = SubscriptionOut.model_validate(sub)
+    out.webhook_url = f"/webhooks/database?secret={sub.webhook_secret}"
+    if conn:
+        parsed = parse_repo_url(conn.url)
+        out.connection_name = conn.name
+        out.connection_url = conn.url.strip()
+        out.projects = conn.projects or []
+        out.environments = conn.environments or []
+        out.connection_type_name = get_dict_label_name(db, conn.type)
+        out.project_display = connection_project_display(db, conn)
+        out.environment_display = connection_environment_display(db, conn)
+        out.provider = parsed.provider
+        out.github_repo = parsed.repo_path
+        out.github_branch = parsed.branch
+        out.repo_base_url = parsed.base_url
+        out.repo_web_url = parsed.web_url or conn.url.strip()
+        out.branch_display = parsed.branch or "全部分支"
+    else:
+        out.branch_display = out.github_branch or "全部分支"
+        out.repo_web_url = out.connection_url
+    return out
 
 
 @router.get("/dict", response_model=list[DictItemOut])
@@ -87,6 +155,7 @@ def get_connections(
     project: int | None = Query(None),
     environment: int | None = Query(None),
     is_shared: bool | None = Query(None),
+    group_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
     return list_connections(
@@ -95,6 +164,7 @@ def get_connections(
         project=project,
         environment=environment,
         is_shared=is_shared,
+        group_id=group_id,
     )
 
 
@@ -106,11 +176,22 @@ def get_home_connections(
 ):
     data = get_home_data(db, project, environment)
     return HomeResponse(
-        shared=data["shared"],
-        scoped=data["scoped"],
+        groups=[
+            {
+                "id": group["id"],
+                "name": group["name"],
+                "description": group["description"],
+                "sort_order": group["sort_order"],
+                "is_system": group["is_system"],
+                "is_project_group": group["is_project_group"],
+                "connections": group["connections"],
+            }
+            for group in data["groups"]
+        ],
         projects=[DictItemOut.from_orm_item(item) for item in data["projects"]],
         environments=[DictItemOut.from_orm_item(item) for item in data["environments"]],
         labels=[DictItemOut.from_orm_item(item) for item in data["labels"]],
+        connection_groups=[DictItemOut.from_orm_item(item) for item in data["connection_groups"]],
     )
 
 
@@ -168,15 +249,110 @@ def remove_connection(connection_id: int, db: Session = Depends(get_db)):
     delete_connection(db, conn)
 
 
-@router.get("/subscriptions", response_model=list[SubscriptionOut])
-def get_subscriptions(db: Session = Depends(get_db)):
-    subs = db.query(Subscription).all()
-    result = []
-    for sub in subs:
-        out = SubscriptionOut.model_validate(sub)
-        out.webhook_url = f"/webhooks/database?secret={sub.webhook_secret}"
-        result.append(out)
-    return result
+@router.get("/subscriptions", response_model=list[GitlabSubscriptionTreeOut])
+def get_subscriptions(
+    project: int | None = Query(None),
+    enabled: bool | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    return list_gitlab_subscription_trees(db, project=project, enabled=enabled)
+
+
+@router.patch("/subscriptions/{subscription_id}", response_model=GitlabSubscriptionTreeOut)
+def patch_subscription(
+    subscription_id: int, data: SubscriptionUpdate, db: Session = Depends(get_db)
+):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    update_subscription(db, sub, data)
+    trees = list_gitlab_subscription_trees(db)
+    for tree in trees:
+        if tree["id"] == subscription_id:
+            return tree
+    conn = sub.connection
+    return {
+        "id": sub.id,
+        "connection_id": sub.connection_id,
+        "connection_name": conn.name if conn else str(sub.connection_id),
+        "connection_type_name": get_dict_label_name(db, conn.type) if conn else None,
+        "project_display": connection_project_display(db, conn) if conn else "-",
+        "environment_display": connection_environment_display(db, conn) if conn else "-",
+        "links": [],
+    }
+
+
+@router.get("/subscriptions/{subscription_id}/schema-monitor", response_model=SchemaMonitorOut)
+def get_subscription_schema_monitor(subscription_id: int, db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        return get_schema_monitor_status(db, sub)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/subscriptions/{subscription_id}/schema-monitor", response_model=SchemaMonitorOut)
+def put_subscription_schema_monitor(
+    subscription_id: int,
+    data: SchemaMonitorConfigUpdate,
+    db: Session = Depends(get_db),
+):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        return update_schema_monitor_config(db, sub, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/subscriptions/{subscription_id}/schema-ping", response_model=SchemaMonitorPingOut)
+def post_subscription_schema_ping(
+    subscription_id: int,
+    data: SchemaMonitorPingRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        return ping_schema_monitor_for_subscription(db, sub, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/subscriptions/{subscription_id}/schema-scan", response_model=SchemaScanResultOut)
+async def post_subscription_schema_scan(subscription_id: int, db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        result = await scan_subscription_schema_async(db, sub)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"结构巡检失败: {exc}") from exc
+
+    if result.get("was_first_scan"):
+        message = "已完成基线快照，后续巡检将自动检测结构变更"
+    elif result["changes_detected"] == 0:
+        message = "巡检完成，未检测到结构变更"
+    else:
+        message = f"检测到 {result['changes_detected']} 项结构变更，已写入活动日志"
+    snapshot = result.get("snapshot")
+    if isinstance(snapshot, dict):
+        snapshot_data = snapshot.get("snapshot")
+    else:
+        snapshot_data = snapshot.snapshot if snapshot else None
+    return SchemaScanResultOut(
+        subscription_id=result["subscription_id"],
+        changes_detected=result["changes_detected"],
+        logs_created=result["logs_created"],
+        has_baseline=bool(snapshot_data),
+        message=message,
+    )
 
 
 @router.post("/subscriptions", response_model=SubscriptionOut, status_code=201)
@@ -187,35 +363,31 @@ def post_subscription(data: SubscriptionCreate, db: Session = Depends(get_db)):
     if conn.subscription:
         raise HTTPException(status_code=400, detail="Subscription already exists")
     sub = create_subscription(db, data)
-    out = SubscriptionOut.model_validate(sub)
-    out.webhook_url = f"/webhooks/database?secret={sub.webhook_secret}"
-    return out
-
-
-@router.patch("/subscriptions/{subscription_id}", response_model=SubscriptionOut)
-def patch_subscription(
-    subscription_id: int, data: SubscriptionUpdate, db: Session = Depends(get_db)
-):
-    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-    sub = update_subscription(db, sub, data)
-    out = SubscriptionOut.model_validate(sub)
-    out.webhook_url = f"/webhooks/database?secret={sub.webhook_secret}"
-    return out
+    return _subscription_to_out(sub, db)
 
 
 @router.get("/logs", response_model=list[ActivityLogOut])
-def get_logs(
+async def get_logs(
     project: int | None = Query(None),
     environment: int | None = Query(None),
     source_type: str | None = Query(None),
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
 ):
-    return list_activity_logs(
+    logs = list_activity_logs(
         db, project=project, environment=environment, source_type=source_type, limit=limit
     )
+    await backfill_missing_commit_times(db, logs)
+    return logs
+
+
+@router.get("/logs/{log_id}/diff", response_model=ActivityLogDiffOut)
+async def get_log_diff(log_id: int, db: Session = Depends(get_db)):
+    log = get_activity_log(db, log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    data = await get_or_fetch_log_diff(db, log)
+    return ActivityLogDiffOut(**data)
 
 
 @router.patch("/logs/{log_id}/read", response_model=ActivityLogOut)

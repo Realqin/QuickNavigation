@@ -38,13 +38,8 @@ interface FilterValues {
   name?: string;
   project?: number;
   environment?: number;
-  is_shared?: boolean;
+  group_id?: number;
 }
-
-const SHARED_FILTER_OPTIONS = [
-  { label: '是', value: true },
-  { label: '否', value: false },
-];
 
 type RowKind = 'parent' | 'child';
 
@@ -107,7 +102,7 @@ function buildRows(connections: Connection[], expandedIds: Set<number>): Connect
 }
 
 export default function ConnectionsPage() {
-  const { projects, environments, labels } = useDictGroup();
+  const { projects, environments, labels, connectionGroups } = useDictGroup();
   const [form] = Form.useForm<FilterValues>();
   const projectFilterOptions = useMemo(
     () => [{ label: '其他', value: FILTER_EMPTY }, ...projects.options],
@@ -138,7 +133,7 @@ export default function ConnectionsPage() {
         name: values.name || undefined,
         project: values.project,
         environment: values.environment,
-        is_shared: values.is_shared,
+        group_id: values.group_id,
       });
       setData(list);
       setSelectedRowKeys((prev) => prev.filter((id) => list.some((item) => item.id === id)));
@@ -194,7 +189,7 @@ export default function ConnectionsPage() {
   };
 
   const handleValuesChange = (changed: Partial<FilterValues>, allValues: FilterValues) => {
-    if ('project' in changed || 'environment' in changed || 'is_shared' in changed) {
+    if ('project' in changed || 'environment' in changed || 'group_id' in changed) {
       loadData(allValues);
       return;
     }
@@ -323,12 +318,12 @@ export default function ConnectionsPage() {
             options={environmentFilterOptions}
           />
         </Form.Item>
-        <Form.Item name="is_shared" label="共用">
+        <Form.Item name="group_id" label="分组">
           <Select
             allowClear
-            style={{ width: 100 }}
+            style={{ width: 140 }}
             placeholder="全部"
-            options={SHARED_FILTER_OPTIONS}
+            options={connectionGroups.options}
           />
         </Form.Item>
       </Form>
@@ -445,9 +440,10 @@ export default function ConnectionsPage() {
             ),
           },
           {
-            title: '共用',
-            dataIndex: 'is_shared',
-            render: (_, row) => (row.connection.is_shared ? '是' : '否'),
+            title: '分组',
+            dataIndex: 'group_id',
+            render: (_, row) =>
+              connectionGroups.idMap[row.connection.group_id ?? 0] ?? '-',
           },
           {
             title: '操作',
@@ -505,6 +501,8 @@ export default function ConnectionsPage() {
         projectOptions={projects.options}
         environmentOptions={environments.options}
         labelOptions={labels.options}
+        groupOptions={connectionGroups.options}
+        groupItems={connectionGroups.items}
         onCancel={() => {
           setModalOpen(false);
           setEditing(null);
