@@ -256,10 +256,6 @@ export default function ConnectionFormModal({
       message.warning('测试终端连接前请先填写密码');
       return;
     }
-    if (connectionKind === 'database' && !password && !connection?.password_set) {
-      message.warning('测试数据库连接需要填写密码');
-      return;
-    }
     setTesting(true);
     try {
       const result = await testConnection({

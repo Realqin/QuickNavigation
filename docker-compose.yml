@@ -18,6 +18,19 @@ services:
       timeout: 5s
       retries: 20
 
+  omnidb:
+    build: ./docker/omnidb
+    container_name: quicknav-omnidb
+    restart: unless-stopped
+    environment:
+      OMNIDB_ADMIN_USER: admin
+      OMNIDB_ADMIN_PASSWORD: admin@123
+    ports:
+      - "8081:8000"
+      - "25482:25482"
+    volumes:
+      - omnidb_data:/home/omnidb/.omnidb/omnidb-server
+
   backend:
     build: ./backend
     container_name: quicknav-backend
@@ -32,9 +45,19 @@ services:
       GITLAB_BASE_URL: http://gitlab.bj.uniseas.com.cn
       PUBLIC_WEBHOOK_BASE_URL: http://192.168.6.127:8080
       SCHEMA_MONITOR_INTERVAL_SECONDS: 300
+      OMNIDB_INTERNAL_URL: http://omnidb:8000
+      OMNIDB_PUBLIC_PORT: 8081
+      OMNIDB_ADMIN_USER: admin
+      OMNIDB_ADMIN_PASSWORD: admin@123
+      OMNIDB_MYSQL_HOST: mysql
+      OMNIDB_DB_PATH: /omnidb-data/omnidb.db
+    volumes:
+      - omnidb_data:/omnidb-data
     depends_on:
       mysql:
         condition: service_healthy
+      omnidb:
+        condition: service_started
     ports:
       - "8000:8000"
 
@@ -49,3 +72,4 @@ services:
 
 volumes:
   mysql_data:
+  omnidb_data:

@@ -187,6 +187,13 @@ export interface DictFormValues {
 
 export interface PublicConfig {
   webhook_base_url: string;
+  omnidb_base_url?: string;
+}
+
+export interface OmnidbOpenResult {
+  embed_url: string;
+  connection_name: string;
+  omnidb_connection_id?: number | null;
 }
 
 export interface SchemaMonitorStatus {

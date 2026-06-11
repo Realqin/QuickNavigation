@@ -8,6 +8,7 @@ import {
   fetchHome,
   fetchLogs,
   markLogRead,
+  openOmnidbConsole,
   reorderConnections,
   updateConnection,
 } from '../api';
@@ -23,6 +24,7 @@ import {
   useDict,
 } from '../hooks/useDict';
 import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
+import { openOmnidbInNewTab } from '../utils/omnidb';
 import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
 const { Content, Sider } = Layout;
@@ -71,7 +73,6 @@ export default function HomePage() {
   const [editing, setEditing] = useState<Connection | null>(null);
   const [schemaChangeLog, setSchemaChangeLog] = useState<ActivityLog | null>(null);
   const [schemaChangeOpen, setSchemaChangeOpen] = useState(false);
-
   const resolvedProject = useMemo(() => {
     if (project && projectOptions.some((o) => o.value === project)) return project;
     return projectOptions[0]?.value ?? null;
@@ -208,6 +209,21 @@ export default function HomePage() {
     }
   };
 
+  const handleOpenDatabase = async (conn: Connection) => {
+    const hide = message.loading('正在同步数据库并自动连接 OmniDB...', 0);
+    try {
+      await openOmnidbInNewTab(openOmnidbConsole, conn.id);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'browser blocked popup') {
+        message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
+      } else {
+        message.error('打开数据库控制台失败，请确认 OmniDB 已启动（端口 8081）');
+      }
+    } finally {
+      hide();
+    }
+  };
+
   const selectProjectOptions = projectOptions.length ? projectOptions : dictToOptions(projectItems);
   const selectEnvironmentOptions = environmentOptions.length
     ? environmentOptions
@@ -295,6 +311,8 @@ export default function HomePage() {
                   setModalOpen(true);
                 }}
                 onDelete={handleDelete}
+                onOpen={handleOpenDatabase}
+                labelItems={labelItems}
                 labelIdMap={labelIdMap}
                 labelColorMap={labelColorMap}
                 labelIconIndexMap={labelIconIndexMap}

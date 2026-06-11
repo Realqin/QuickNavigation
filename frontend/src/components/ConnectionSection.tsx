@@ -16,7 +16,8 @@ import {
 import { Collapse, Empty, Typography } from 'antd';
 import { useMemo } from 'react';
 import { sortConnectionsByTypeOrder } from '../hooks/useDict';
-import type { Connection } from '../types';
+import type { Connection, DictItem } from '../types';
+import { LABEL_DATABASE } from '../utils/connectionType';
 import ConnectionCard from './ConnectionCard';
 
 interface Props {
@@ -29,6 +30,8 @@ interface Props {
   onReorder: (items: Connection[]) => void;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
+  onOpen?: (connection: Connection) => void;
+  labelItems?: DictItem[];
   labelIdMap?: Record<number, string>;
   labelColorMap?: Record<number, string>;
   labelIconIndexMap?: Record<number, number>;
@@ -47,6 +50,8 @@ export default function ConnectionSection({
   onReorder,
   onEdit,
   onDelete,
+  onOpen,
+  labelItems = [],
   labelIdMap,
   labelColorMap,
   labelIconIndexMap,
@@ -57,6 +62,11 @@ export default function ConnectionSection({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const databaseTypeIds = useMemo(
+    () => new Set(labelItems.filter((item) => item.name === LABEL_DATABASE).map((item) => item.id)),
+    [labelItems],
   );
 
   const displayConnections = useMemo(
@@ -88,6 +98,8 @@ export default function ConnectionSection({
           envLabels={(conn.environments ?? []).map((id) => envIdMap?.[id] ?? String(id))}
           onEdit={onEdit}
           onDelete={onDelete}
+          onOpen={onOpen}
+          isDatabaseType={databaseTypeIds.has(conn.type)}
         />
       ))}
     </div>

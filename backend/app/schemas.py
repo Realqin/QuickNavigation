@@ -405,6 +405,13 @@ class SchemaScanResultOut(BaseModel):
 
 class PublicConfigOut(BaseModel):
     webhook_base_url: str
+    omnidb_base_url: str = ""
+
+
+class OmnidbOpenOut(BaseModel):
+    embed_url: str
+    connection_name: str
+    omnidb_connection_id: int | None = None
 
 
 class RepoAccessSettingsOut(BaseModel):

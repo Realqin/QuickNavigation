@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from app.database import get_db
 from app.repo_access_config import get_public_webhook_base_url
@@ -20,6 +21,7 @@ from app.schemas import (
     DictItemUpdate,
     GitlabSubscriptionTreeOut,
     HomeResponse,
+    OmnidbOpenOut,
     PublicConfigOut,
     RepoAccessSettingsOut,
     RepoAccessSettingsUpdate,
@@ -34,8 +36,11 @@ from app.schemas import (
     SubscriptionUpdate,
 )
 from app.connection_test_service import test_connection
+from app.omnidb_service import build_omnidb_public_base, prepare_omnidb_open
+from app.config import settings
 from app.services import (
     connection_environment_display,
+    connection_is_database_type,
     connection_project_display,
     create_connection,
     create_dict_item,
@@ -72,9 +77,12 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 
 @router.get("/public/config", response_model=PublicConfigOut)
-def public_config():
+def public_config(request: Request):
     configured = get_public_webhook_base_url()
-    return PublicConfigOut(webhook_base_url=configured)
+    return PublicConfigOut(
+        webhook_base_url=configured,
+        omnidb_base_url=build_omnidb_public_base(request.headers.get("host")),
+    )
 
 
 @router.get("/settings/repo-access", response_model=RepoAccessSettingsOut)
@@ -211,6 +219,26 @@ def post_connection(data: ConnectionCreate, db: Session = Depends(get_db)):
 @router.post("/connections/test-connection", response_model=ConnectionTestOut)
 def post_test_connection(data: ConnectionTestRequest, db: Session = Depends(get_db)):
     return test_connection(db, data)
+
+
+@router.post("/connections/{connection_id}/omnidb-open", response_model=OmnidbOpenOut)
+def post_omnidb_open(
+    connection_id: int,
+    request: Request,
+    public_host: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not connection_is_database_type(db, conn):
+        raise HTTPException(status_code=400, detail="仅数据库类型连接支持 OmniDB")
+    host_hint = public_host or request.headers.get("host")
+    public_base = build_omnidb_public_base(host_hint)
+    if not settings.omnidb_internal_url:
+        raise HTTPException(status_code=503, detail="OmniDB 未配置")
+    payload = prepare_omnidb_open(conn, public_base=public_base)
+    return OmnidbOpenOut(**payload)
 
 
 @router.patch("/connections/reorder")

@@ -10,6 +10,7 @@ import type {
   DictItem,
   DictType,
   HomeData,
+  OmnidbOpenResult,
   GitlabSubscriptionTree,
   PublicConfig,
   RepoAccessSettings,
@@ -62,6 +63,20 @@ export async function deleteConnection(id: number): Promise<void> {
 
 export async function batchDeleteConnections(ids: number[]): Promise<void> {
   await client.post('/api/connections/batch-delete', { ids });
+}
+
+export async function openOmnidbConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<OmnidbOpenResult> {
+  const { data } = await client.post<OmnidbOpenResult>(
+    `/api/connections/${connectionId}/omnidb-open`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+    },
+  );
+  return data;
 }
 
 export async function testConnection(

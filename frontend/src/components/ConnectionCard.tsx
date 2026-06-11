@@ -19,8 +19,10 @@ interface Props {
   projectLabels?: string[];
   envLabels?: string[];
   editMode?: boolean;
+  isDatabaseType?: boolean;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
+  onOpen?: (connection: Connection) => void;
 }
 
 function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
@@ -47,8 +49,10 @@ export default function ConnectionCard({
   projectLabels = [],
   envLabels = [],
   editMode = false,
+  isDatabaseType = false,
   onEdit,
   onDelete,
+  onOpen,
 }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
@@ -68,6 +72,10 @@ export default function ConnectionCard({
 
   const openMainUrl = () => {
     if (editMode) return;
+    if (isDatabaseType && onOpen) {
+      onOpen(connection);
+      return;
+    }
     window.open(connection.url, '_blank', 'noopener,noreferrer');
   };
 
