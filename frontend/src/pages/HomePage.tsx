@@ -316,6 +316,7 @@ export default function HomePage() {
         projectOptions={selectProjectOptions}
         environmentOptions={selectEnvironmentOptions}
         labelOptions={labelOptions}
+        labelItems={labelItems}
         groupOptions={selectGroupOptions}
         groupItems={groupItems}
         defaultProjects={resolvedProject != null ? [resolvedProject] : []}

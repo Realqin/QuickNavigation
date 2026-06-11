@@ -30,6 +30,11 @@ export interface Connection {
   is_shared: boolean;
   sort_order: number;
   icon?: string | null;
+  host?: string | null;
+  port?: number | null;
+  username?: string | null;
+  database_name?: string | null;
+  password_set?: boolean;
   is_reachable?: boolean | null;
   last_checked_at?: string | null;
   sub_links: SubLink[];
@@ -144,13 +149,33 @@ export interface Subscription {
 
 export interface ConnectionFormValues {
   name: string;
-  url: string;
+  url?: string;
   description?: string;
   projects: number[];
   environments: number[];
   type: number;
   group_id: number;
   sub_links?: SubLink[];
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  database_name?: string;
+}
+
+export interface ConnectionTestPayload {
+  type: number;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  database_name?: string;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  message: string;
+  latency_ms?: number | null;
 }
 
 export interface DictFormValues {

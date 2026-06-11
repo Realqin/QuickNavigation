@@ -7,6 +7,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button, Card, Popconfirm, Space, Tag, Typography } from 'antd';
 import type { Connection } from '../types';
+import { formatConnectionEndpoint } from '../utils/connectionType';
 import { getTypeTextColor, hexWithAlpha, resolveTypeIcon } from '../utils/labelTheme';
 import SubLinksPanel from './SubLinksPanel';
 
@@ -121,7 +122,7 @@ export default function ConnectionCard({
           <div className="connection-card__main">
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
               <Typography.Text type="secondary" ellipsis>
-                {connection.url}
+                {formatConnectionEndpoint(connection)}
               </Typography.Text>
               {connection.description && (
                 <Typography.Text type="secondary" ellipsis>

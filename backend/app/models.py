@@ -38,6 +38,11 @@ class Connection(Base):
     is_reachable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sub_links: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    host: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    database_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

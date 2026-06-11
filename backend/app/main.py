@@ -19,6 +19,10 @@ from app.services import (
     DICT_ENVIRONMENT,
     DICT_LABEL,
     DICT_PROJECT,
+    LABEL_DATABASE,
+    LABEL_OTHER,
+    LABEL_REDIS,
+    LABEL_TERMINAL,
     PROJECT_CONNECTION_GROUP_NAME,
 )
 from app.websocket_manager import ws_manager
@@ -88,15 +92,23 @@ def seed_dict_items(db) -> None:
         (DICT_ENVIRONMENT, "测试环境", None, 1),
         (DICT_ENVIRONMENT, "预发环境", None, 2),
         (DICT_ENVIRONMENT, "生产环境", None, 3),
-        (DICT_LABEL, "普通连接", None, 0),
-        (DICT_LABEL, "GitHub 仓库", "GitHub 代码仓库", 1),
-        (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2),
-        (DICT_LABEL, "数据库", "数据库连接", 3),
+        (DICT_LABEL, LABEL_OTHER, "普通跳转连接", 0, True),
+        (DICT_LABEL, "GitHub 仓库", "GitHub 代码仓库", 1, False),
+        (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2, False),
+        (DICT_LABEL, LABEL_DATABASE, "数据库连接", 3, True),
+        (DICT_LABEL, LABEL_TERMINAL, "SSH/终端模拟器连接", 4, True),
+        (DICT_LABEL, LABEL_REDIS, "Redis 缓存连接", 5, True),
     ]
     db.add_all(
         [
-            DictItem(dict_type=dict_type, name=name, description=desc, sort_order=sort_order)
-            for dict_type, name, desc, sort_order in seeds
+            DictItem(
+                dict_type=dict_type,
+                name=name,
+                description=desc,
+                sort_order=sort_order,
+                is_system=is_system,
+            )
+            for dict_type, name, desc, sort_order, is_system in seeds
         ]
     )
     db.commit()
@@ -402,6 +414,64 @@ def migrate_subscription_github_branch() -> None:
         conn.execute(text("ALTER TABLE subscriptions ADD COLUMN github_branch VARCHAR(128) NULL"))
 
 
+def migrate_connection_endpoint_fields() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("connections"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("connections")}
+    additions = {
+        "host": "VARCHAR(256) NULL",
+        "port": "INT NULL",
+        "username": "VARCHAR(128) NULL",
+        "password": "VARCHAR(512) NULL",
+        "database_name": "VARCHAR(128) NULL",
+    }
+    with engine.begin() as conn:
+        for column_name, column_type in additions.items():
+            if column_name not in cols:
+                conn.execute(text(f"ALTER TABLE connections ADD COLUMN {column_name} {column_type}"))
+
+
+def seed_system_labels(db) -> None:
+    legacy_normal = (
+        db.query(DictItem)
+        .filter(DictItem.dict_type == DICT_LABEL, DictItem.name == "普通连接")
+        .first()
+    )
+    if legacy_normal:
+        legacy_normal.name = LABEL_OTHER
+        legacy_normal.description = legacy_normal.description or "普通跳转连接"
+        legacy_normal.is_system = True
+
+    system_labels = [
+        (LABEL_OTHER, "普通跳转连接", 0),
+        (LABEL_DATABASE, "数据库连接", 3),
+        (LABEL_TERMINAL, "SSH/终端模拟器连接", 4),
+        (LABEL_REDIS, "Redis 缓存连接", 5),
+    ]
+    for name, description, sort_order in system_labels:
+        item = (
+            db.query(DictItem)
+            .filter(DictItem.dict_type == DICT_LABEL, DictItem.name == name)
+            .first()
+        )
+        if item:
+            item.is_system = True
+            item.description = item.description or description
+            item.sort_order = sort_order
+            continue
+        db.add(
+            DictItem(
+                dict_type=DICT_LABEL,
+                name=name,
+                description=description,
+                sort_order=sort_order,
+                is_system=True,
+            )
+        )
+    db.commit()
+
+
 def seed_gitlab_label(db) -> None:
     exists = (
         db.query(DictItem)
@@ -529,9 +599,11 @@ def init_db() -> None:
     migrate_drop_dict_name_unique()
     migrate_subscription_github_branch()
     migrate_subscription_link_enabled()
+    migrate_connection_endpoint_fields()
     db = SessionLocal()
     try:
         seed_dict_items(db)
+        seed_system_labels(db)
         seed_gitlab_label(db)
         seed_connection_groups(db)
         seed_connections(db)

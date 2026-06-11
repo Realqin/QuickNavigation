@@ -46,6 +46,12 @@ DICT_CONNECTION_GROUP = "connection_group"
 
 PROJECT_CONNECTION_GROUP_NAME = "项目连接"
 
+LABEL_OTHER = "其他"
+LABEL_DATABASE = "数据库"
+LABEL_TERMINAL = "终端模拟器"
+LABEL_REDIS = "Redis"
+SYSTEM_LABEL_NAMES = {LABEL_OTHER, LABEL_DATABASE, LABEL_TERMINAL, LABEL_REDIS}
+
 FILTER_EMPTY = 0  # 筛选「其他」：项目/环境未填写
 
 
@@ -136,7 +142,111 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     data["sub_links"] = cleaned
 
+    for key in ("host", "username", "database_name"):
+        if key in data and data[key] is not None:
+            data[key] = str(data[key]).strip() or None
+    if "port" in data and data["port"] is not None:
+        data["port"] = int(data["port"])
+    if "password" in data and data["password"] is not None:
+        password = str(data["password"]).strip()
+        data["password"] = password or None
+
     return data
+
+
+def get_label_kind(db: Session, type_id: int) -> str:
+    item = get_dict_item(db, type_id, DICT_LABEL)
+    if not item:
+        return "other"
+    if item.name == LABEL_DATABASE:
+        return "database"
+    if item.name == LABEL_TERMINAL:
+        return "terminal"
+    if item.name == LABEL_REDIS:
+        return "redis"
+    return "other"
+
+
+def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
+    host = str(data.get("host") or "").strip()
+    if not host:
+        return str(data.get("url") or "").strip()
+    port = data.get("port")
+    if kind == "database":
+        port = port or 3306
+        database_name = str(data.get("database_name") or "").strip()
+        suffix = f"/{database_name}" if database_name else ""
+        return f"mysql://{host}:{port}{suffix}"
+    if kind == "terminal":
+        port = port or 22
+        username = str(data.get("username") or "").strip()
+        auth = f"{username}@" if username else ""
+        return f"ssh://{auth}{host}:{port}"
+    if kind == "redis":
+        port = port or 6379
+        return f"redis://{host}:{port}"
+    return str(data.get("url") or "").strip()
+
+
+def _validate_connection_by_kind(kind: str, data: dict[str, Any], *, require_password: bool) -> None:
+    if kind == "other":
+        if not str(data.get("url") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入 URL")
+        return
+
+    if not str(data.get("host") or "").strip():
+        raise HTTPException(status_code=400, detail="请输入 IP")
+    if data.get("port") is None:
+        raise HTTPException(status_code=400, detail="请输入端口")
+
+    if kind == "database":
+        if not str(data.get("username") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入用户名")
+    elif kind == "terminal":
+        if not str(data.get("username") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入账号")
+        if require_password and not str(data.get("password") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入密码")
+
+
+def _clear_connection_fields_for_kind(kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(data)
+    if kind == "other":
+        for key in ("host", "port", "username", "password", "database_name"):
+            payload[key] = None
+        return payload
+    payload["url"] = _build_connection_url(kind, payload)
+    if kind != "database":
+        payload["database_name"] = None
+    if kind == "redis":
+        payload["username"] = None
+    return payload
+
+
+def connection_to_out_dict(conn: Connection) -> dict[str, Any]:
+    return {
+        "id": conn.id,
+        "name": conn.name,
+        "url": conn.url,
+        "description": conn.description,
+        "projects": conn.projects or [],
+        "environments": conn.environments or [],
+        "type": conn.type,
+        "group_id": conn.group_id,
+        "is_shared": conn.is_shared,
+        "sort_order": conn.sort_order,
+        "icon": conn.icon,
+        "sub_links": conn.sub_links or [],
+        "host": conn.host,
+        "port": conn.port,
+        "username": conn.username,
+        "database_name": conn.database_name,
+        "password_set": bool(conn.password),
+        "is_reachable": conn.is_reachable,
+        "last_checked_at": conn.last_checked_at,
+        "created_at": conn.created_at,
+        "updated_at": conn.updated_at,
+    }
 
 
 
@@ -373,6 +483,10 @@ def create_dict_item(db: Session, data: DictItemCreate) -> DictItem:
 
         raise HTTPException(status_code=400, detail="「项目连接」为系统默认分组，不可重复创建")
 
+    if data.type == DICT_LABEL and data.name in SYSTEM_LABEL_NAMES:
+
+        raise HTTPException(status_code=400, detail=f"「{data.name}」为系统预置类型，不可重复创建")
+
     item = DictItem(
 
         dict_type=data.type,
@@ -405,7 +519,7 @@ def update_dict_item(db: Session, item: DictItem, data: DictItemUpdate) -> DictI
 
         if payload.get("name") and payload["name"] != item.name:
 
-            raise HTTPException(status_code=400, detail="系统默认分组不可修改名称")
+            raise HTTPException(status_code=400, detail="系统预置项不可修改名称")
 
         payload.pop("name", None)
 
@@ -433,7 +547,7 @@ def delete_dict_item(db: Session, item: DictItem) -> None:
 
     if item.is_system:
 
-        raise HTTPException(status_code=400, detail="系统默认分组不可删除")
+        raise HTTPException(status_code=400, detail="系统预置项不可删除")
 
     if _connection_uses_dict_id(db, item):
 
@@ -609,6 +723,14 @@ def create_connection(db: Session, data: ConnectionCreate) -> Connection:
 
     _validate_connection_dict_values(db, payload)
 
+    kind = get_label_kind(db, int(payload["type"]))
+    _validate_connection_by_kind(
+        kind,
+        payload,
+        require_password=kind == "terminal",
+    )
+    payload = _clear_connection_fields_for_kind(kind, payload)
+
     conn = Connection(**payload)
 
     db.add(conn)
@@ -631,6 +753,9 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
 
     payload = data.model_dump(exclude_unset=True)
 
+    if "password" in payload and not str(payload.get("password") or "").strip():
+        payload.pop("password", None)
+
     merged = {
 
         "group_id": payload.get("group_id", conn.group_id),
@@ -643,11 +768,43 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
 
         "type": payload.get("type", conn.type),
 
+        "name": payload.get("name", conn.name),
+
+        "url": payload.get("url", conn.url),
+
+        "host": payload.get("host", conn.host),
+
+        "port": payload.get("port", conn.port),
+
+        "username": payload.get("username", conn.username),
+
+        "password": payload.get("password", conn.password),
+
+        "database_name": payload.get("database_name", conn.database_name),
+
     }
 
     merged = _normalize_connection_payload(merged)
 
     _validate_connection_dict_values(db, merged)
+
+    kind = get_label_kind(db, int(merged["type"]))
+    require_password = kind == "terminal" and not conn.password
+    _validate_connection_by_kind(kind, merged, require_password=require_password)
+    normalized = _clear_connection_fields_for_kind(kind, merged)
+
+    for key in ("url", "host", "port", "username", "database_name"):
+        if key in normalized:
+            payload[key] = normalized[key]
+    if kind == "other":
+        for key in ("host", "port", "username", "database_name"):
+            payload[key] = None
+        if "password" in payload or conn.password:
+            payload["password"] = None
+    elif "password" not in payload:
+        pass
+    elif kind == "redis" and "username" in payload:
+        payload["username"] = None
 
 
 
@@ -727,11 +884,7 @@ def _gitlab_label_ids(db: Session) -> set[int]:
 
 def _database_label_ids(db: Session) -> set[int]:
     items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {
-        item.id
-        for item in items
-        if "database" in item.name.lower() or "数据库" in item.name
-    }
+    return {item.id for item in items if item.name == LABEL_DATABASE}
 
 
 def _subscription_label_ids(db: Session) -> set[int]:

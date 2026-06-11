@@ -75,7 +75,7 @@ class SubLinkItem(BaseModel):
 
 class ConnectionBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    url: str = Field(min_length=1, max_length=512)
+    url: str = Field(default="", max_length=512)
     description: str | None = None
     projects: list[int] = Field(default_factory=list)
     environments: list[int] = Field(default_factory=list)
@@ -85,6 +85,10 @@ class ConnectionBase(BaseModel):
     sort_order: int = 0
     icon: str | None = None
     sub_links: list[SubLinkItem] = Field(default_factory=list)
+    host: str | None = Field(default=None, max_length=256)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    database_name: str | None = Field(default=None, max_length=128)
 
     @field_validator("sub_links", mode="before")
     @classmethod
@@ -137,6 +141,7 @@ class ConnectionBase(BaseModel):
 
 class ConnectionCreate(ConnectionBase):
     group_id: int
+    password: str | None = Field(default=None, max_length=512)
 
     @field_validator("group_id", mode="before")
     @classmethod
@@ -148,7 +153,7 @@ class ConnectionCreate(ConnectionBase):
 
 class ConnectionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
-    url: str | None = Field(default=None, min_length=1, max_length=512)
+    url: str | None = Field(default=None, max_length=512)
     description: str | None = None
     projects: list[int] | None = None
     environments: list[int] | None = None
@@ -158,6 +163,11 @@ class ConnectionUpdate(BaseModel):
     sort_order: int | None = None
     icon: str | None = None
     sub_links: list[SubLinkItem] | None = None
+    host: str | None = Field(default=None, max_length=256)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+    database_name: str | None = Field(default=None, max_length=128)
 
     @field_validator("projects", "environments", mode="before")
     @classmethod
@@ -172,12 +182,34 @@ class ConnectionUpdate(BaseModel):
 
 class ConnectionOut(ConnectionBase):
     id: int
+    password_set: bool = False
     is_reachable: bool | None = None
     last_checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_connection(cls, conn: Any) -> "ConnectionOut":
+        from app.services import connection_to_out_dict
+
+        return cls.model_validate(connection_to_out_dict(conn))
+
+
+class ConnectionTestRequest(BaseModel):
+    type: int
+    host: str = Field(min_length=1, max_length=256)
+    port: int = Field(ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+    database_name: str | None = Field(default=None, max_length=128)
+
+
+class ConnectionTestOut(BaseModel):
+    ok: bool
+    message: str
+    latency_ms: float | None = None
 
 
 class ConnectionPingOut(BaseModel):

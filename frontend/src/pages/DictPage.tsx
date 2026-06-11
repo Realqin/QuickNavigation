@@ -128,10 +128,10 @@ export default function DictPage() {
             render: (_value, _record, index) => (page - 1) * PAGE_SIZE + index + 1,
           },
           { title: '名称', dataIndex: 'name', ellipsis: true },
-          ...(activeType === 'connection_group'
+          ...(activeType === 'connection_group' || activeType === 'label'
             ? [
                 {
-                  title: '系统默认',
+                  title: '系统预置',
                   dataIndex: 'is_system',
                   width: 96,
                   render: (v: boolean | undefined) => (v ? '是' : '否'),

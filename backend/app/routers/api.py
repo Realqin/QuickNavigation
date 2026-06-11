@@ -12,6 +12,8 @@ from app.schemas import (
     BatchDeleteRequest,
     ConnectionCreate,
     ConnectionOut,
+    ConnectionTestOut,
+    ConnectionTestRequest,
     ConnectionUpdate,
     DictItemCreate,
     DictItemOut,
@@ -31,6 +33,7 @@ from app.schemas import (
     SubscriptionOut,
     SubscriptionUpdate,
 )
+from app.connection_test_service import test_connection
 from app.services import (
     connection_environment_display,
     connection_project_display,
@@ -158,14 +161,17 @@ def get_connections(
     group_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    return list_connections(
-        db,
-        name=name,
-        project=project,
-        environment=environment,
-        is_shared=is_shared,
-        group_id=group_id,
-    )
+    return [
+        ConnectionOut.from_connection(conn)
+        for conn in list_connections(
+            db,
+            name=name,
+            project=project,
+            environment=environment,
+            is_shared=is_shared,
+            group_id=group_id,
+        )
+    ]
 
 
 @router.get("/connections/home", response_model=HomeResponse)
@@ -184,7 +190,9 @@ def get_home_connections(
                 "sort_order": group["sort_order"],
                 "is_system": group["is_system"],
                 "is_project_group": group["is_project_group"],
-                "connections": group["connections"],
+                "connections": [
+                    ConnectionOut.from_connection(conn) for conn in group["connections"]
+                ],
             }
             for group in data["groups"]
         ],
@@ -197,7 +205,12 @@ def get_home_connections(
 
 @router.post("/connections", response_model=ConnectionOut, status_code=201)
 def post_connection(data: ConnectionCreate, db: Session = Depends(get_db)):
-    return create_connection(db, data)
+    return ConnectionOut.from_connection(create_connection(db, data))
+
+
+@router.post("/connections/test-connection", response_model=ConnectionTestOut)
+def post_test_connection(data: ConnectionTestRequest, db: Session = Depends(get_db)):
+    return test_connection(db, data)
 
 
 @router.patch("/connections/reorder")
@@ -220,7 +233,7 @@ async def post_connection_ping(
     connection = await ping_connection_record(connection_id, sub_index=sub_index)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection or sub-link not found")
-    return connection
+    return ConnectionOut.from_connection(connection)
 
 
 @router.get("/connections/{connection_id}", response_model=ConnectionOut)
@@ -228,7 +241,7 @@ def get_connection(connection_id: int, db: Session = Depends(get_db)):
     conn = db.query(Connection).filter(Connection.id == connection_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    return conn
+    return ConnectionOut.from_connection(conn)
 
 
 @router.patch("/connections/{connection_id}", response_model=ConnectionOut)
@@ -238,7 +251,7 @@ def patch_connection(
     conn = db.query(Connection).filter(Connection.id == connection_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    return update_connection(db, conn, data)
+    return ConnectionOut.from_connection(update_connection(db, conn, data))
 
 
 @router.delete("/connections/{connection_id}", status_code=204)

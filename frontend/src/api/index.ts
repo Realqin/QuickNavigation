@@ -4,6 +4,8 @@ import type {
   ActivityLogDiff,
   Connection,
   ConnectionFormValues,
+  ConnectionTestPayload,
+  ConnectionTestResult,
   DictFormValues,
   DictItem,
   DictType,
@@ -60,6 +62,16 @@ export async function deleteConnection(id: number): Promise<void> {
 
 export async function batchDeleteConnections(ids: number[]): Promise<void> {
   await client.post('/api/connections/batch-delete', { ids });
+}
+
+export async function testConnection(
+  payload: ConnectionTestPayload,
+): Promise<ConnectionTestResult> {
+  const { data } = await client.post<ConnectionTestResult>(
+    '/api/connections/test-connection',
+    payload,
+  );
+  return data;
 }
 
 export async function pingConnection(id: number, subIndex?: number): Promise<Connection> {

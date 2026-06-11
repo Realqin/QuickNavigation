@@ -33,6 +33,7 @@ import {
 import ConnectionFormModal from '../components/ConnectionFormModal';
 import { useDictGroup } from '../hooks/useDict';
 import type { Connection, ConnectionFormValues, SubLink } from '../types';
+import { formatConnectionEndpoint } from '../utils/connectionType';
 
 interface FilterValues {
   name?: string;
@@ -387,7 +388,10 @@ export default function ConnectionsPage() {
             dataIndex: 'url',
             ellipsis: true,
             render: (_, row) => {
-              const url = row.kind === 'child' ? row.subLink?.url : row.connection.url;
+              const url =
+                row.kind === 'child'
+                  ? row.subLink?.url
+                  : formatConnectionEndpoint(row.connection);
               if (!url) return '-';
               return (
                 <a href={url} target="_blank" rel="noreferrer">
@@ -501,6 +505,7 @@ export default function ConnectionsPage() {
         projectOptions={projects.options}
         environmentOptions={environments.options}
         labelOptions={labels.options}
+        labelItems={labels.items}
         groupOptions={connectionGroups.options}
         groupItems={connectionGroups.items}
         onCancel={() => {
