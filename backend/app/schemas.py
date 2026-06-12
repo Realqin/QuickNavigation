@@ -462,6 +462,7 @@ class PublicConfigOut(BaseModel):
     omnidb_base_url: str = ""
     sshwifty_base_url: str = ""
     redpanda_base_url: str = ""
+    redisinsight_base_url: str = ""
 
 
 class OmnidbOpenOut(BaseModel):
@@ -478,6 +479,12 @@ class SshwiftyOpenOut(BaseModel):
 class RedpandaOpenOut(BaseModel):
     embed_url: str
     connection_name: str
+
+
+class RedisinsightOpenOut(BaseModel):
+    embed_url: str
+    connection_name: str
+    database_id: str | None = None
 
 
 class MqttConsoleConfigOut(BaseModel):

@@ -212,6 +212,7 @@ export interface PublicConfig {
   omnidb_base_url?: string;
   sshwifty_base_url?: string;
   redpanda_base_url?: string;
+  redisinsight_base_url?: string;
 }
 
 export interface OmnidbOpenResult {
@@ -228,6 +229,12 @@ export interface SshwiftyOpenResult {
 export interface RedpandaOpenResult {
   embed_url: string;
   connection_name: string;
+}
+
+export interface RedisinsightOpenResult {
+  embed_url: string;
+  connection_name: string;
+  database_id?: string | null;
 }
 
 export interface SchemaMonitorStatus {

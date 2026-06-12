@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     redpanda_config_path: str = str(_REDPANDA_DATA_DIR / "console-config.yml")
     redpanda_clusters_manifest_path: str = str(_REDPANDA_DATA_DIR / "clusters-manifest.yml")
     redpanda_reload_wait_seconds: float = 3.0
+    redisinsight_internal_url: str = "http://127.0.0.1:5540"
+    redisinsight_public_port: int = 5540
+    redisinsight_redis_host: str = "127.0.0.1"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

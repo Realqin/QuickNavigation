@@ -986,6 +986,15 @@ def connection_is_kafka_type(db: Session, conn: Connection) -> bool:
     return conn.type in _kafka_label_ids(db)
 
 
+def _redis_label_ids(db: Session) -> set[int]:
+    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
+    return {item.id for item in items if item.name == LABEL_REDIS}
+
+
+def connection_is_redis_type(db: Session, conn: Connection) -> bool:
+    return conn.type in _redis_label_ids(db)
+
+
 def _dict_ids_display(db: Session, dict_type: str, ids: list | None) -> str:
     if not ids:
         return ""

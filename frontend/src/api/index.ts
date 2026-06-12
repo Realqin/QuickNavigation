@@ -14,6 +14,7 @@ import type {
   OmnidbOpenResult,
   MqttConsoleConfig,
   RedpandaOpenResult,
+  RedisinsightOpenResult,
   SshwiftyOpenResult,
   GitlabSubscriptionTree,
   PublicConfig,
@@ -96,6 +97,21 @@ export async function openRedpandaConsole(
 ): Promise<RedpandaOpenResult> {
   const { data } = await client.post<RedpandaOpenResult>(
     `/api/connections/${connectionId}/redpanda-open`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+      timeout: 30000,
+    },
+  );
+  return data;
+}
+
+export async function openRedisinsightConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<RedisinsightOpenResult> {
+  const { data } = await client.post<RedisinsightOpenResult>(
+    `/api/connections/${connectionId}/redisinsight-open`,
     null,
     {
       params: publicHost ? { public_host: publicHost } : undefined,

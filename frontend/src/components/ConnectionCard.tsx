@@ -23,9 +23,13 @@ interface Props {
   isTerminalType?: boolean;
   isMqttType?: boolean;
   isKafkaType?: boolean;
+  isRedisType?: boolean;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
-  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt' | 'kafka') => void;
+  onOpen?: (
+    connection: Connection,
+    kind: 'database' | 'terminal' | 'mqtt' | 'kafka' | 'redis',
+  ) => void;
 }
 
 function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
@@ -56,6 +60,7 @@ export default function ConnectionCard({
   isTerminalType = false,
   isMqttType = false,
   isKafkaType = false,
+  isRedisType = false,
   onEdit,
   onDelete,
   onOpen,
@@ -92,6 +97,10 @@ export default function ConnectionCard({
     }
     if (isKafkaType && onOpen) {
       onOpen(connection, 'kafka');
+      return;
+    }
+    if (isRedisType && onOpen) {
+      onOpen(connection, 'redis');
       return;
     }
     window.open(connection.url, '_blank', 'noopener,noreferrer');

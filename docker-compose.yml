@@ -65,6 +65,19 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: quicknav-redisinsight
+    restart: unless-stopped
+    environment:
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   backend:
     build: ./backend
     container_name: quicknav-backend
@@ -92,6 +105,9 @@ services:
       REDPANDA_CONFIG_PATH: /config/console-config.yml
       REDPANDA_CLUSTERS_MANIFEST_PATH: /config/clusters-manifest.yml
       REDPANDA_RELOAD_WAIT_SECONDS: 3
+      REDISINSIGHT_INTERNAL_URL: http://redisinsight:5540
+      REDISINSIGHT_PUBLIC_PORT: 5540
+      REDISINSIGHT_REDIS_HOST: host.docker.internal
     volumes:
       - omnidb_data:/omnidb-data
       - ./docker/redpanda/data:/config
@@ -103,6 +119,8 @@ services:
       sshwifty:
         condition: service_started
       redpanda-console:
+        condition: service_started
+      redisinsight:
         condition: service_started
     ports:
       - "8000:8000"
@@ -119,3 +137,4 @@ services:
 volumes:
   mysql_data:
   omnidb_data:
+  redisinsight_data:

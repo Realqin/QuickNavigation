@@ -24,6 +24,7 @@ from app.schemas import (
     MqttConsoleConfigOut,
     OmnidbOpenOut,
     RedpandaOpenOut,
+    RedisinsightOpenOut,
     PublicConfigOut,
     SshwiftyOpenOut,
     RepoAccessSettingsOut,
@@ -41,6 +42,7 @@ from app.schemas import (
 from app.connection_test_service import test_connection
 from app.omnidb_service import build_omnidb_public_base, prepare_omnidb_open
 from app.redpanda_service import build_redpanda_public_base, prepare_redpanda_open
+from app.redisinsight_service import build_redisinsight_public_base, prepare_redisinsight_open
 from app.mqtt_service import prepare_mqtt_console_config
 from app.sshwifty_service import build_sshwifty_public_base, prepare_sshwifty_open
 from app.config import settings
@@ -48,6 +50,7 @@ from app.services import (
     connection_environment_display,
     connection_is_database_type,
     connection_is_kafka_type,
+    connection_is_redis_type,
     connection_is_terminal_type,
     connection_project_display,
     create_connection,
@@ -92,6 +95,7 @@ def public_config(request: Request):
         omnidb_base_url=build_omnidb_public_base(request.headers.get("host")),
         sshwifty_base_url=build_sshwifty_public_base(request.headers.get("host")),
         redpanda_base_url=build_redpanda_public_base(request.headers.get("host")),
+        redisinsight_base_url=build_redisinsight_public_base(request.headers.get("host")),
     )
 
 
@@ -287,6 +291,26 @@ def post_redpanda_open(
         raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
     payload = prepare_redpanda_open(db, conn, public_base=public_base)
     return RedpandaOpenOut(**payload)
+
+
+@router.post("/connections/{connection_id}/redisinsight-open", response_model=RedisinsightOpenOut)
+def post_redisinsight_open(
+    connection_id: int,
+    request: Request,
+    public_host: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not connection_is_redis_type(db, conn):
+        raise HTTPException(status_code=400, detail="仅 Redis 类型连接支持 RedisInsight")
+    host_hint = public_host or request.headers.get("host")
+    public_base = build_redisinsight_public_base(host_hint)
+    if not settings.redisinsight_internal_url:
+        raise HTTPException(status_code=503, detail="RedisInsight 未配置")
+    payload = prepare_redisinsight_open(conn, public_base=public_base)
+    return RedisinsightOpenOut(**payload)
 
 
 @router.get("/connections/{connection_id}/mqtt-config", response_model=MqttConsoleConfigOut)

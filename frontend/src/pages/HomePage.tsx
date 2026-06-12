@@ -10,6 +10,7 @@ import {
   markLogRead,
   openOmnidbConsole,
   openRedpandaConsole,
+  openRedisinsightConsole,
   openSshwiftyConsole,
   reorderConnections,
   updateConnection,
@@ -29,6 +30,7 @@ import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '.
 import { openOmnidbInNewTab } from '../utils/omnidb';
 import { openMqttConsole } from '../utils/mqttNavigation';
 import { openRedpandaInNewTab } from '../utils/redpanda';
+import { openRedisinsightInNewTab } from '../utils/redisinsight';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
 import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
@@ -216,7 +218,7 @@ export default function HomePage() {
 
   const handleOpenEmbedded = async (
     conn: Connection,
-    kind: 'database' | 'terminal' | 'mqtt' | 'kafka',
+    kind: 'database' | 'terminal' | 'mqtt' | 'kafka' | 'redis',
   ) => {
     if (kind === 'mqtt') {
       try {
@@ -238,6 +240,22 @@ export default function HomePage() {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
         } else {
           message.error('打开 Redpanda Console 失败，请确认服务已启动（端口 8082）');
+        }
+      } finally {
+        hide();
+      }
+      return;
+    }
+
+    if (kind === 'redis') {
+      const hide = message.loading('正在同步 Redis 连接并打开 RedisInsight...', 0);
+      try {
+        await openRedisinsightInNewTab(openRedisinsightConsole, conn.id);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'browser blocked popup') {
+          message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
+        } else {
+          message.error('打开 RedisInsight 失败，请确认服务已启动（端口 5540）');
         }
       } finally {
         hide();
