@@ -21,6 +21,7 @@ from app.schemas import (
     DictItemUpdate,
     GitlabSubscriptionTreeOut,
     HomeResponse,
+    MqttConsoleConfigOut,
     OmnidbOpenOut,
     PublicConfigOut,
     SshwiftyOpenOut,
@@ -38,6 +39,7 @@ from app.schemas import (
 )
 from app.connection_test_service import test_connection
 from app.omnidb_service import build_omnidb_public_base, prepare_omnidb_open
+from app.mqtt_service import prepare_mqtt_console_config
 from app.sshwifty_service import build_sshwifty_public_base, prepare_sshwifty_open
 from app.config import settings
 from app.services import (
@@ -261,6 +263,14 @@ def post_sshwifty_open(
     public_base = build_sshwifty_public_base(host_hint)
     payload = prepare_sshwifty_open(conn, public_base=public_base)
     return SshwiftyOpenOut(**payload)
+
+
+@router.get("/connections/{connection_id}/mqtt-config", response_model=MqttConsoleConfigOut)
+def get_mqtt_config(connection_id: int, db: Session = Depends(get_db)):
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return MqttConsoleConfigOut(**prepare_mqtt_console_config(db, conn))
 
 
 @router.patch("/connections/reorder")

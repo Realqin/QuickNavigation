@@ -5,6 +5,11 @@ export interface SubLink {
   last_checked_at?: string | null;
 }
 
+export interface MqttSubscription {
+  topic: string;
+  name?: string | null;
+}
+
 export type DictType = 'project' | 'environment' | 'label' | 'connection_group';
 
 export interface DictItem {
@@ -34,6 +39,8 @@ export interface Connection {
   port?: number | null;
   username?: string | null;
   database_name?: string | null;
+  mqtt_ws_path?: string | null;
+  mqtt_subscriptions?: MqttSubscription[];
   password_set?: boolean;
   is_reachable?: boolean | null;
   last_checked_at?: string | null;
@@ -161,6 +168,21 @@ export interface ConnectionFormValues {
   username?: string;
   password?: string;
   database_name?: string;
+  mqtt_ws_path?: string;
+  mqtt_subscriptions?: MqttSubscription[];
+}
+
+export interface MqttConsoleConfig {
+  connection_id: number;
+  connection_name: string;
+  host: string;
+  port: number;
+  ws_path: string;
+  username: string;
+  password: string;
+  subscriptions: MqttSubscription[];
+  use_bridge?: boolean;
+  bridge_path?: string;
 }
 
 export interface ConnectionTestPayload {

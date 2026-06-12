@@ -73,6 +73,11 @@ class SubLinkItem(BaseModel):
     last_checked_at: datetime | str | None = None
 
 
+class MqttSubscriptionItem(BaseModel):
+    topic: str = Field(min_length=1, max_length=256)
+    name: str | None = Field(default=None, max_length=128)
+
+
 class ConnectionBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(default="", max_length=512)
@@ -89,6 +94,27 @@ class ConnectionBase(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
     database_name: str | None = Field(default=None, max_length=128)
+    mqtt_ws_path: str | None = Field(default=None, max_length=128)
+    mqtt_subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
+
+    @field_validator("mqtt_subscriptions", mode="before")
+    @classmethod
+    def normalize_mqtt_subscriptions(cls, value: Any) -> list:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return []
+        cleaned = []
+        for item in value:
+            if isinstance(item, dict):
+                topic = str(item.get("topic", "")).strip()
+                name = str(item.get("name", "")).strip()
+            else:
+                topic = str(getattr(item, "topic", "")).strip()
+                name = str(getattr(item, "name", "")).strip()
+            if topic:
+                cleaned.append({"topic": topic, "name": name or topic})
+        return cleaned
 
     @field_validator("sub_links", mode="before")
     @classmethod
@@ -168,6 +194,27 @@ class ConnectionUpdate(BaseModel):
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=512)
     database_name: str | None = Field(default=None, max_length=128)
+    mqtt_ws_path: str | None = Field(default=None, max_length=128)
+    mqtt_subscriptions: list[MqttSubscriptionItem] | None = None
+
+    @field_validator("mqtt_subscriptions", mode="before")
+    @classmethod
+    def normalize_mqtt_subscriptions_update(cls, value: Any) -> list | None:
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            return []
+        cleaned = []
+        for item in value:
+            if isinstance(item, dict):
+                topic = str(item.get("topic", "")).strip()
+                name = str(item.get("name", "")).strip()
+            else:
+                topic = str(getattr(item, "topic", "")).strip()
+                name = str(getattr(item, "name", "")).strip()
+            if topic:
+                cleaned.append({"topic": topic, "name": name or topic})
+        return cleaned
 
     @field_validator("projects", "environments", mode="before")
     @classmethod
@@ -418,6 +465,19 @@ class OmnidbOpenOut(BaseModel):
 class SshwiftyOpenOut(BaseModel):
     embed_url: str
     connection_name: str
+
+
+class MqttConsoleConfigOut(BaseModel):
+    connection_id: int
+    connection_name: str
+    host: str
+    port: int
+    ws_path: str
+    username: str = ""
+    password: str = ""
+    subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
+    use_bridge: bool = True
+    bridge_path: str = ""
 
 
 class RepoAccessSettingsOut(BaseModel):

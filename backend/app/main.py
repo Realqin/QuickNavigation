@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine, SessionLocal
 from app.models import Connection, DictItem
+from app.mqtt_bridge_service import run_mqtt_bridge
 from app.ping_scheduler import connection_ping_scheduler
 from app.schema_monitor_scheduler import schema_monitor_scheduler
 from app.routers import api, webhooks
@@ -21,9 +22,11 @@ from app.services import (
     DICT_PROJECT,
     LABEL_DATABASE,
     LABEL_OTHER,
+    LABEL_MQTT,
     LABEL_REDIS,
     LABEL_TERMINAL,
     PROJECT_CONNECTION_GROUP_NAME,
+    connection_is_mqtt_type,
 )
 from app.websocket_manager import ws_manager
 
@@ -98,6 +101,7 @@ def seed_dict_items(db) -> None:
         (DICT_LABEL, LABEL_DATABASE, "数据库连接", 3, True),
         (DICT_LABEL, LABEL_TERMINAL, "SSH/终端模拟器连接", 4, True),
         (DICT_LABEL, LABEL_REDIS, "Redis 缓存连接", 5, True),
+        (DICT_LABEL, LABEL_MQTT, "MQTT 消息连接", 6, True),
     ]
     db.add_all(
         [
@@ -432,6 +436,19 @@ def migrate_connection_endpoint_fields() -> None:
                 conn.execute(text(f"ALTER TABLE connections ADD COLUMN {column_name} {column_type}"))
 
 
+def migrate_mqtt_fields() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("connections"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("connections")}
+    with engine.begin() as conn:
+        if "mqtt_ws_path" not in cols:
+            conn.execute(text("ALTER TABLE connections ADD COLUMN mqtt_ws_path VARCHAR(128) NULL"))
+        if "mqtt_subscriptions" not in cols:
+            conn.execute(text("ALTER TABLE connections ADD COLUMN mqtt_subscriptions JSON NULL"))
+            conn.execute(text("UPDATE connections SET mqtt_subscriptions = JSON_ARRAY() WHERE mqtt_subscriptions IS NULL"))
+
+
 def seed_system_labels(db) -> None:
     legacy_normal = (
         db.query(DictItem)
@@ -448,6 +465,7 @@ def seed_system_labels(db) -> None:
         (LABEL_DATABASE, "数据库连接", 3),
         (LABEL_TERMINAL, "SSH/终端模拟器连接", 4),
         (LABEL_REDIS, "Redis 缓存连接", 5),
+        (LABEL_MQTT, "MQTT 消息连接", 6),
     ]
     for name, description, sort_order in system_labels:
         item = (
@@ -600,6 +618,7 @@ def init_db() -> None:
     migrate_subscription_github_branch()
     migrate_subscription_link_enabled()
     migrate_connection_endpoint_fields()
+    migrate_mqtt_fields()
     db = SessionLocal()
     try:
         seed_dict_items(db)
@@ -627,3 +646,25 @@ async def websocket_logs(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/mqtt/{connection_id}")
+async def websocket_mqtt_bridge(websocket: WebSocket, connection_id: int):
+    db = SessionLocal()
+    try:
+        conn = db.query(Connection).filter(Connection.id == connection_id).first()
+        if not conn:
+            await websocket.close(code=4404)
+            return
+        if not connection_is_mqtt_type(db, conn):
+            await websocket.close(code=4403)
+            return
+        preset_topics: list[str] = []
+        for item in conn.mqtt_subscriptions or []:
+            if isinstance(item, dict):
+                topic = str(item.get("topic", "")).strip()
+                if topic:
+                    preset_topics.append(topic)
+        await run_mqtt_bridge(websocket, conn, preset_topics)
+    finally:
+        db.close()

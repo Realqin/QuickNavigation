@@ -21,9 +21,10 @@ interface Props {
   editMode?: boolean;
   isDatabaseType?: boolean;
   isTerminalType?: boolean;
+  isMqttType?: boolean;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
-  onOpen?: (connection: Connection, kind: 'database' | 'terminal') => void;
+  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt') => void;
 }
 
 function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
@@ -52,6 +53,7 @@ export default function ConnectionCard({
   editMode = false,
   isDatabaseType = false,
   isTerminalType = false,
+  isMqttType = false,
   onEdit,
   onDelete,
   onOpen,
@@ -80,6 +82,10 @@ export default function ConnectionCard({
     }
     if (isTerminalType && onOpen) {
       onOpen(connection, 'terminal');
+      return;
+    }
+    if (isMqttType && onOpen) {
+      onOpen(connection, 'mqtt');
       return;
     }
     window.open(connection.url, '_blank', 'noopener,noreferrer');

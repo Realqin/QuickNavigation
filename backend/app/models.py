@@ -43,6 +43,8 @@ class Connection(Base):
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     password: Mapped[str | None] = mapped_column(String(512), nullable=True)
     database_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mqtt_ws_path: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mqtt_subscriptions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

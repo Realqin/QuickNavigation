@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { buildAppWebSocketUrl } from '../utils/appWebSocket';
 import type {
   ActivityLog,
   ActivityLogDiff,
@@ -11,6 +12,7 @@ import type {
   DictType,
   HomeData,
   OmnidbOpenResult,
+  MqttConsoleConfig,
   SshwiftyOpenResult,
   GitlabSubscriptionTree,
   PublicConfig,
@@ -76,6 +78,13 @@ export async function openOmnidbConsole(
     {
       params: publicHost ? { public_host: publicHost } : undefined,
     },
+  );
+  return data;
+}
+
+export async function fetchMqttConsoleConfig(connectionId: number): Promise<MqttConsoleConfig> {
+  const { data } = await client.get<MqttConsoleConfig>(
+    `/api/connections/${connectionId}/mqtt-config`,
   );
   return data;
 }
@@ -161,8 +170,7 @@ export async function updateSubscription(
 }
 
 export function createLogsWebSocket(onMessage: (log: ActivityLog) => void): WebSocket {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
+  const ws = new WebSocket(buildAppWebSocketUrl('/ws/logs'));
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);

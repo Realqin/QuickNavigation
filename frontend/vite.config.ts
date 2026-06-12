@@ -10,8 +10,10 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8000',
       '/webhooks': 'http://127.0.0.1:8000',
       '/ws': {
-        target: 'ws://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
         ws: true,
+        secure: false,
       },
     },
   },

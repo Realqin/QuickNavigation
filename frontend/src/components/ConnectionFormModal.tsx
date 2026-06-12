@@ -49,6 +49,89 @@ function TypeFields({
   testing: boolean;
   onTest: () => void;
 }) {
+  if (kind === 'mqtt') {
+    return (
+      <>
+        <Form.Item
+          name="host"
+          label="主机"
+          rules={[{ required: true, message: '请输入主机' }]}
+          extra="仅 IP 或域名，如 10.100.0.230（MQTTX 的 mqtt:// 前缀可省略）"
+        >
+          <Input placeholder="10.100.0.230" />
+        </Form.Item>
+        <Form.Item
+          name="port"
+          label="端口"
+          rules={[{ required: true, message: '请输入端口' }]}
+          extra="与 Broker WebSocket 监听端口一致（如 1883 或 8083），非 MQTTX TCP 专用端口时请核对 Broker 文档"
+        >
+          <InputNumber min={1} max={65535} className="connection-form-modal__port" />
+        </Form.Item>
+        <Form.Item
+          name="mqtt_ws_path"
+          label="挂载路径"
+          initialValue="/mqtt"
+          extra="WebSocket 路径，常见 /mqtt（不是 /ws 或 /wss）"
+        >
+          <Input placeholder="/mqtt" />
+        </Form.Item>
+        <Form.Item name="username" label="用户名">
+          <Input placeholder="可选" />
+        </Form.Item>
+        <Form.Item name="password" label="密码">
+          <Input.Password
+            placeholder={passwordSet ? '已设置，留空不修改' : '可选'}
+            autoComplete="new-password"
+          />
+        </Form.Item>
+        <Form.List name="mqtt_subscriptions">
+          {(fields, { add, remove }) => (
+            <>
+              <div className="connection-form-modal__mqtt-sub-title">预置订阅</div>
+              {fields.map(({ key, name, ...restField }) => (
+                <div key={key} className="connection-form-modal__sub-link-row">
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'name']}
+                    className="connection-form-modal__sub-link-name"
+                  >
+                    <Input placeholder="备注名（可选）" />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'topic']}
+                    rules={[{ required: true, message: 'Topic' }]}
+                    className="connection-form-modal__sub-link-url"
+                  >
+                    <Input placeholder="sensor/temperature" />
+                  </Form.Item>
+                  <MinusCircleOutlined
+                    onClick={() => remove(name)}
+                    style={{ color: '#ff4d4f', marginTop: 8 }}
+                  />
+                </div>
+              ))}
+              <Button
+                type="dashed"
+                onClick={() => add({ topic: '', name: '' })}
+                icon={<PlusOutlined />}
+                className="connection-form-modal__sub-link-add"
+              >
+                添加订阅项
+              </Button>
+            </>
+          )}
+        </Form.List>
+        <div className="connection-form-modal__test-btn">
+          <Button icon={<ApiOutlined />} loading={testing} onClick={onTest}>
+            测试连接
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   if (kind === 'other') {
     return (
       <>
@@ -113,7 +196,7 @@ function TypeFields({
       <Form.Item name="port" label="端口" rules={[{ required: true, message: '请输入端口' }]}>
         <InputNumber min={1} max={65535} className="connection-form-modal__port" />
       </Form.Item>
-      {kind !== 'redis' ? (
+      {kind !== 'redis' && kind !== 'mqtt' ? (
         <Form.Item
           name="username"
           label={kind === 'database' ? '用户名' : '账号'}
@@ -196,6 +279,8 @@ export default function ConnectionFormModal({
           username: connection.username ?? undefined,
           password: '',
           database_name: connection.database_name ?? undefined,
+          mqtt_ws_path: connection.mqtt_ws_path ?? '/mqtt',
+          mqtt_subscriptions: connection.mqtt_subscriptions ?? [],
         });
       } else {
         const initialType = defaultType ?? labelOptions[0]?.value;
@@ -215,6 +300,8 @@ export default function ConnectionFormModal({
           type: initialType,
           group_id: defaultGroupId ?? projectGroupId ?? groupOptions[0]?.value,
           sub_links: [],
+          mqtt_subscriptions: [],
+          mqtt_ws_path: '/mqtt',
           port: DEFAULT_PORTS[initialKind],
         });
       }
@@ -249,7 +336,9 @@ export default function ConnectionFormModal({
         ? (['type', 'host', 'port', 'username', 'password'] as const)
         : connectionKind === 'terminal'
           ? (['type', 'host', 'port', 'username', 'password'] as const)
-          : (['type', 'host', 'port', 'password'] as const);
+          : connectionKind === 'mqtt'
+            ? (['type', 'host', 'port', 'username', 'password'] as const)
+            : (['type', 'host', 'port', 'password'] as const);
     const values = await form.validateFields([...fields]);
     const password = values.password?.trim();
     if (!password && !connection?.password_set && connectionKind === 'terminal') {
@@ -287,6 +376,15 @@ export default function ConnectionFormModal({
       payload.sub_links = (values.sub_links ?? []).filter(
         (item) => item?.name?.trim() && item?.url?.trim(),
       );
+    } else if (connectionKind === 'mqtt') {
+      payload.url = '';
+      payload.sub_links = [];
+      payload.mqtt_subscriptions = (values.mqtt_subscriptions ?? []).filter(
+        (item) => item?.topic?.trim(),
+      );
+      if (!payload.password?.trim()) {
+        delete payload.password;
+      }
     } else {
       payload.url = '';
       payload.sub_links = [];
@@ -311,7 +409,11 @@ export default function ConnectionFormModal({
           ? connection
             ? '编辑 Redis 连接'
             : '新增 Redis 连接'
-          : connection
+          : connectionKind === 'mqtt'
+            ? connection
+              ? '编辑 MQTT 连接'
+              : '新增 MQTT 连接'
+            : connection
             ? '编辑连接'
             : '新增连接';
 

@@ -50,7 +50,8 @@ LABEL_OTHER = "其他"
 LABEL_DATABASE = "数据库"
 LABEL_TERMINAL = "终端模拟器"
 LABEL_REDIS = "Redis"
-SYSTEM_LABEL_NAMES = {LABEL_OTHER, LABEL_DATABASE, LABEL_TERMINAL, LABEL_REDIS}
+LABEL_MQTT = "MQTT"
+SYSTEM_LABEL_NAMES = {LABEL_OTHER, LABEL_DATABASE, LABEL_TERMINAL, LABEL_REDIS, LABEL_MQTT}
 
 FILTER_EMPTY = 0  # 筛选「其他」：项目/环境未填写
 
@@ -142,6 +143,23 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     data["sub_links"] = cleaned
 
+    mqtt_subscriptions = data.get("mqtt_subscriptions") or []
+    mqtt_cleaned: list[dict[str, Any]] = []
+    for item in mqtt_subscriptions:
+        if isinstance(item, dict):
+            topic = str(item.get("topic", "")).strip()
+            name = str(item.get("name", "")).strip()
+        else:
+            topic = str(getattr(item, "topic", "")).strip()
+            name = str(getattr(item, "name", "")).strip()
+        if topic:
+            mqtt_cleaned.append({"topic": topic, "name": name or topic})
+    data["mqtt_subscriptions"] = mqtt_cleaned
+
+    if "mqtt_ws_path" in data and data["mqtt_ws_path"] is not None:
+        path = str(data["mqtt_ws_path"]).strip()
+        data["mqtt_ws_path"] = path or "/mqtt"
+
     for key in ("host", "username", "database_name"):
         if key in data and data[key] is not None:
             data[key] = str(data[key]).strip() or None
@@ -164,6 +182,8 @@ def get_label_kind(db: Session, type_id: int) -> str:
         return "terminal"
     if item.name == LABEL_REDIS:
         return "redis"
+    if item.name == LABEL_MQTT:
+        return "mqtt"
     return "other"
 
 
@@ -185,6 +205,9 @@ def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
     if kind == "redis":
         port = port or 6379
         return f"redis://{host}:{port}"
+    if kind == "mqtt":
+        port = port or 8083
+        return f"mqtt://{host}:{port}"
     return str(data.get("url") or "").strip()
 
 
@@ -216,10 +239,16 @@ def _clear_connection_fields_for_kind(kind: str, data: dict[str, Any]) -> dict[s
             payload[key] = None
         return payload
     payload["url"] = _build_connection_url(kind, payload)
+    payload["sub_links"] = []
     if kind != "database":
         payload["database_name"] = None
     if kind == "redis":
         payload["username"] = None
+    if kind == "mqtt":
+        payload["mqtt_ws_path"] = str(payload.get("mqtt_ws_path") or "/mqtt").strip() or "/mqtt"
+    if kind != "mqtt":
+        payload["mqtt_subscriptions"] = []
+        payload["mqtt_ws_path"] = None
     return payload
 
 
@@ -241,6 +270,8 @@ def connection_to_out_dict(conn: Connection) -> dict[str, Any]:
         "port": conn.port,
         "username": conn.username,
         "database_name": conn.database_name,
+        "mqtt_ws_path": conn.mqtt_ws_path,
+        "mqtt_subscriptions": conn.mqtt_subscriptions or [],
         "password_set": bool(conn.password),
         "is_reachable": conn.is_reachable,
         "last_checked_at": conn.last_checked_at,
@@ -906,6 +937,15 @@ def connection_is_database_type(db: Session, conn: Connection) -> bool:
 
 def connection_is_terminal_type(db: Session, conn: Connection) -> bool:
     return conn.type in _terminal_label_ids(db)
+
+
+def _mqtt_label_ids(db: Session) -> set[int]:
+    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
+    return {item.id for item in items if item.name == LABEL_MQTT}
+
+
+def connection_is_mqtt_type(db: Session, conn: Connection) -> bool:
+    return conn.type in _mqtt_label_ids(db)
 
 
 def _dict_ids_display(db: Session, dict_type: str, ids: list | None) -> str:

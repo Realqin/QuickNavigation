@@ -26,6 +26,7 @@ import {
 } from '../hooks/useDict';
 import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
 import { openOmnidbInNewTab } from '../utils/omnidb';
+import { openMqttConsole } from '../utils/mqttNavigation';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
 import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
@@ -211,7 +212,18 @@ export default function HomePage() {
     }
   };
 
-  const handleOpenEmbedded = async (conn: Connection, kind: 'database' | 'terminal') => {
+  const handleOpenEmbedded = async (conn: Connection, kind: 'database' | 'terminal' | 'mqtt') => {
+    if (kind === 'mqtt') {
+      try {
+        openMqttConsole(conn.id);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'browser blocked popup') {
+          message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
+        }
+      }
+      return;
+    }
+
     const hide = message.loading(
       kind === 'database'
         ? '正在同步数据库并自动连接 OmniDB...'
