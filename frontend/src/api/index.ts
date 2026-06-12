@@ -13,6 +13,7 @@ import type {
   HomeData,
   OmnidbOpenResult,
   MqttConsoleConfig,
+  RedpandaOpenResult,
   SshwiftyOpenResult,
   GitlabSubscriptionTree,
   PublicConfig,
@@ -85,6 +86,21 @@ export async function openOmnidbConsole(
 export async function fetchMqttConsoleConfig(connectionId: number): Promise<MqttConsoleConfig> {
   const { data } = await client.get<MqttConsoleConfig>(
     `/api/connections/${connectionId}/mqtt-config`,
+  );
+  return data;
+}
+
+export async function openRedpandaConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<RedpandaOpenResult> {
+  const { data } = await client.post<RedpandaOpenResult>(
+    `/api/connections/${connectionId}/redpanda-open`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+      timeout: 30000,
+    },
   );
   return data;
 }

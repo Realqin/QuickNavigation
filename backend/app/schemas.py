@@ -90,12 +90,19 @@ class ConnectionBase(BaseModel):
     sort_order: int = 0
     icon: str | None = None
     sub_links: list[SubLinkItem] = Field(default_factory=list)
-    host: str | None = Field(default=None, max_length=256)
+    host: str | None = Field(default=None, max_length=512)
     port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
     database_name: str | None = Field(default=None, max_length=128)
     mqtt_ws_path: str | None = Field(default=None, max_length=128)
     mqtt_subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
+
+    @field_validator("port", mode="before")
+    @classmethod
+    def normalize_optional_port(cls, value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        return int(value)
 
     @field_validator("mqtt_subscriptions", mode="before")
     @classmethod
@@ -246,8 +253,8 @@ class ConnectionOut(ConnectionBase):
 
 class ConnectionTestRequest(BaseModel):
     type: int
-    host: str = Field(min_length=1, max_length=256)
-    port: int = Field(ge=1, le=65535)
+    host: str = Field(min_length=1, max_length=512)
+    port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=512)
     database_name: str | None = Field(default=None, max_length=128)
@@ -454,6 +461,7 @@ class PublicConfigOut(BaseModel):
     webhook_base_url: str
     omnidb_base_url: str = ""
     sshwifty_base_url: str = ""
+    redpanda_base_url: str = ""
 
 
 class OmnidbOpenOut(BaseModel):
@@ -463,6 +471,11 @@ class OmnidbOpenOut(BaseModel):
 
 
 class SshwiftyOpenOut(BaseModel):
+    embed_url: str
+    connection_name: str
+
+
+class RedpandaOpenOut(BaseModel):
     embed_url: str
     connection_name: str
 

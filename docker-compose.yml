@@ -52,6 +52,19 @@ services:
     ports:
       - "8182:8182"
 
+  redpanda-console:
+    build: ./docker/redpanda
+    container_name: quicknav-redpanda-console
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./docker/redpanda/data:/config
+    environment:
+      CONFIG_FILEPATH: /config/console-config.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   backend:
     build: ./backend
     container_name: quicknav-backend
@@ -74,14 +87,22 @@ services:
       OMNIDB_DB_PATH: /omnidb-data/omnidb.db
       SSHWIFTY_PUBLIC_PORT: 8182
       SSHWIFTY_SSH_HOST: host.docker.internal
+      REDPANDA_PUBLIC_PORT: 8082
+      REDPANDA_KAFKA_HOST: host.docker.internal
+      REDPANDA_CONFIG_PATH: /config/console-config.yml
+      REDPANDA_CLUSTERS_MANIFEST_PATH: /config/clusters-manifest.yml
+      REDPANDA_RELOAD_WAIT_SECONDS: 3
     volumes:
       - omnidb_data:/omnidb-data
+      - ./docker/redpanda/data:/config
     depends_on:
       mysql:
         condition: service_healthy
       omnidb:
         condition: service_started
       sshwifty:
+        condition: service_started
+      redpanda-console:
         condition: service_started
     ports:
       - "8000:8000"

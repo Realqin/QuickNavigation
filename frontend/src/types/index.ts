@@ -188,7 +188,7 @@ export interface MqttConsoleConfig {
 export interface ConnectionTestPayload {
   type: number;
   host: string;
-  port: number;
+  port?: number;
   username?: string;
   password?: string;
   database_name?: string;
@@ -211,6 +211,7 @@ export interface PublicConfig {
   webhook_base_url: string;
   omnidb_base_url?: string;
   sshwifty_base_url?: string;
+  redpanda_base_url?: string;
 }
 
 export interface OmnidbOpenResult {
@@ -220,6 +221,11 @@ export interface OmnidbOpenResult {
 }
 
 export interface SshwiftyOpenResult {
+  embed_url: string;
+  connection_name: string;
+}
+
+export interface RedpandaOpenResult {
   embed_url: string;
   connection_name: string;
 }

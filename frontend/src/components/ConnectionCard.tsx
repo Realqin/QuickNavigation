@@ -22,9 +22,10 @@ interface Props {
   isDatabaseType?: boolean;
   isTerminalType?: boolean;
   isMqttType?: boolean;
+  isKafkaType?: boolean;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
-  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt') => void;
+  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt' | 'kafka') => void;
 }
 
 function TypeTag({ label, colorKey }: { label: string; colorKey: string }) {
@@ -54,6 +55,7 @@ export default function ConnectionCard({
   isDatabaseType = false,
   isTerminalType = false,
   isMqttType = false,
+  isKafkaType = false,
   onEdit,
   onDelete,
   onOpen,
@@ -86,6 +88,10 @@ export default function ConnectionCard({
     }
     if (isMqttType && onOpen) {
       onOpen(connection, 'mqtt');
+      return;
+    }
+    if (isKafkaType && onOpen) {
+      onOpen(connection, 'kafka');
       return;
     }
     window.open(connection.url, '_blank', 'noopener,noreferrer');

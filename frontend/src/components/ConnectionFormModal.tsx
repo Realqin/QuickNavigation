@@ -5,10 +5,15 @@ import { testConnection } from '../api';
 import type { Connection, ConnectionFormValues, DictItem } from '../types';
 import {
   DEFAULT_PORTS,
+  LABEL_KAFKA,
   resolveConnectionKind,
   supportsConnectionTest,
   type ConnectionKind,
 } from '../utils/connectionType';
+import {
+  formatKafkaBrokersForInput,
+  normalizeKafkaBrokersInput,
+} from '../utils/kafkaBrokers';
 import './ConnectionFormModal.css';
 
 interface SelectOption {
@@ -49,6 +54,35 @@ function TypeFields({
   testing: boolean;
   onTest: () => void;
 }) {
+  if (kind === 'kafka') {
+    return (
+      <>
+        <Form.Item
+          name="host"
+          label="集群地址"
+          rules={[{ required: true, message: '请输入 Kafka 集群地址' }]}
+          extra="多个节点用英文逗号分隔，格式：IP:端口"
+        >
+          <Input placeholder="10.100.0.211:9092,10.100.0.212:9092,10.100.0.213:9092" />
+        </Form.Item>
+        <Form.Item name="username" label="用户名">
+          <Input placeholder="可选，SASL 认证" />
+        </Form.Item>
+        <Form.Item name="password" label="密码">
+          <Input.Password
+            placeholder={passwordSet ? '已设置，留空不修改' : '可选，SASL 认证'}
+            autoComplete="new-password"
+          />
+        </Form.Item>
+        <div className="connection-form-modal__test-btn">
+          <Button icon={<ApiOutlined />} loading={testing} onClick={onTest}>
+            测试连接
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   if (kind === 'mqtt') {
     return (
       <>
@@ -196,7 +230,7 @@ function TypeFields({
       <Form.Item name="port" label="端口" rules={[{ required: true, message: '请输入端口' }]}>
         <InputNumber min={1} max={65535} className="connection-form-modal__port" />
       </Form.Item>
-      {kind !== 'redis' && kind !== 'mqtt' ? (
+      {kind !== 'redis' && kind !== 'mqtt' && kind !== 'kafka' ? (
         <Form.Item
           name="username"
           label={kind === 'database' ? '用户名' : '账号'}
@@ -265,6 +299,7 @@ export default function ConnectionFormModal({
   useEffect(() => {
     if (open) {
       if (connection) {
+        const editKind = resolveConnectionKind(connection.type, labelItems);
         form.setFieldsValue({
           name: connection.name,
           url: connection.url,
@@ -274,8 +309,14 @@ export default function ConnectionFormModal({
           type: connection.type,
           group_id: connection.group_id ?? projectGroupId,
           sub_links: connection.sub_links ?? [],
-          host: connection.host ?? undefined,
-          port: connection.port ?? DEFAULT_PORTS[resolveConnectionKind(connection.type, labelItems)],
+          host:
+            editKind === 'kafka'
+              ? formatKafkaBrokersForInput(connection.host, connection.port)
+              : (connection.host ?? undefined),
+          port:
+            editKind === 'kafka'
+              ? undefined
+              : (connection.port ?? DEFAULT_PORTS[editKind]),
           username: connection.username ?? undefined,
           password: '',
           database_name: connection.database_name ?? undefined,
@@ -283,7 +324,8 @@ export default function ConnectionFormModal({
           mqtt_subscriptions: connection.mqtt_subscriptions ?? [],
         });
       } else {
-        const initialType = defaultType ?? labelOptions[0]?.value;
+        const kafkaTypeId = labelItems.find((item) => item.name === LABEL_KAFKA)?.id;
+        const initialType = defaultType ?? kafkaTypeId ?? labelOptions[0]?.value;
         const initialKind = resolveConnectionKind(initialType, labelItems);
         form.resetFields();
         form.setFieldsValue({
@@ -302,7 +344,8 @@ export default function ConnectionFormModal({
           sub_links: [],
           mqtt_subscriptions: [],
           mqtt_ws_path: '/mqtt',
-          port: DEFAULT_PORTS[initialKind],
+          host: initialKind === 'kafka' ? '' : undefined,
+          port: initialKind === 'kafka' ? undefined : DEFAULT_PORTS[initialKind],
         });
       }
     }
@@ -323,7 +366,7 @@ export default function ConnectionFormModal({
   ]);
 
   useEffect(() => {
-    if (!open || connection) return;
+    if (!open || connection || connectionKind === 'kafka') return;
     const defaultPort = DEFAULT_PORTS[connectionKind];
     if (defaultPort != null) {
       form.setFieldValue('port', defaultPort);
@@ -338,7 +381,9 @@ export default function ConnectionFormModal({
           ? (['type', 'host', 'port', 'username', 'password'] as const)
           : connectionKind === 'mqtt'
             ? (['type', 'host', 'port', 'username', 'password'] as const)
-            : (['type', 'host', 'port', 'password'] as const);
+            : connectionKind === 'kafka'
+              ? (['type', 'host', 'username', 'password'] as const)
+              : (['type', 'host', 'port', 'password'] as const);
     const values = await form.validateFields([...fields]);
     const password = values.password?.trim();
     if (!password && !connection?.password_set && connectionKind === 'terminal') {
@@ -349,8 +394,11 @@ export default function ConnectionFormModal({
     try {
       const result = await testConnection({
         type: values.type,
-        host: values.host?.trim() ?? '',
-        port: Number(values.port),
+        host:
+          connectionKind === 'kafka'
+            ? normalizeKafkaBrokersInput(values.host?.trim() ?? '')
+            : (values.host?.trim() ?? ''),
+        port: connectionKind === 'kafka' ? undefined : Number(values.port),
         username: values.username?.trim() || undefined,
         password: password || undefined,
         database_name: values.database_name?.trim() || undefined,
@@ -385,6 +433,14 @@ export default function ConnectionFormModal({
       if (!payload.password?.trim()) {
         delete payload.password;
       }
+    } else if (connectionKind === 'kafka') {
+      payload.url = '';
+      payload.sub_links = [];
+      payload.host = normalizeKafkaBrokersInput(values.host?.trim() ?? '');
+      payload.port = undefined;
+      if (!payload.password?.trim()) {
+        delete payload.password;
+      }
     } else {
       payload.url = '';
       payload.sub_links = [];
@@ -413,7 +469,11 @@ export default function ConnectionFormModal({
             ? connection
               ? '编辑 MQTT 连接'
               : '新增 MQTT 连接'
-            : connection
+            : connectionKind === 'kafka'
+              ? connection
+                ? '编辑 Kafka 连接'
+                : '新增 Kafka 连接'
+              : connection
             ? '编辑连接'
             : '新增连接';
 

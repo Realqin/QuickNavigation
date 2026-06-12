@@ -22,6 +22,7 @@ from app.services import (
     DICT_PROJECT,
     LABEL_DATABASE,
     LABEL_OTHER,
+    LABEL_KAFKA,
     LABEL_MQTT,
     LABEL_REDIS,
     LABEL_TERMINAL,
@@ -102,6 +103,7 @@ def seed_dict_items(db) -> None:
         (DICT_LABEL, LABEL_TERMINAL, "SSH/终端模拟器连接", 4, True),
         (DICT_LABEL, LABEL_REDIS, "Redis 缓存连接", 5, True),
         (DICT_LABEL, LABEL_MQTT, "MQTT 消息连接", 6, True),
+        (DICT_LABEL, LABEL_KAFKA, "Kafka 消息队列连接", 7, True),
     ]
     db.add_all(
         [
@@ -466,6 +468,7 @@ def seed_system_labels(db) -> None:
         (LABEL_TERMINAL, "SSH/终端模拟器连接", 4),
         (LABEL_REDIS, "Redis 缓存连接", 5),
         (LABEL_MQTT, "MQTT 消息连接", 6),
+        (LABEL_KAFKA, "Kafka 消息队列连接", 7),
     ]
     for name, description, sort_order in system_labels:
         item = (

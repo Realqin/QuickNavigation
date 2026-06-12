@@ -17,7 +17,7 @@ import { Collapse, Empty, Typography } from 'antd';
 import { useMemo } from 'react';
 import { sortConnectionsByTypeOrder } from '../hooks/useDict';
 import type { Connection, DictItem } from '../types';
-import { LABEL_DATABASE, LABEL_MQTT, LABEL_TERMINAL } from '../utils/connectionType';
+import { LABEL_DATABASE, LABEL_KAFKA, LABEL_MQTT, LABEL_TERMINAL } from '../utils/connectionType';
 import ConnectionCard from './ConnectionCard';
 
 interface Props {
@@ -30,7 +30,7 @@ interface Props {
   onReorder: (items: Connection[]) => void;
   onEdit: (connection: Connection) => void;
   onDelete?: (connection: Connection) => void;
-  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt') => void;
+  onOpen?: (connection: Connection, kind: 'database' | 'terminal' | 'mqtt' | 'kafka') => void;
   labelItems?: DictItem[];
   labelIdMap?: Record<number, string>;
   labelColorMap?: Record<number, string>;
@@ -79,6 +79,11 @@ export default function ConnectionSection({
     [labelItems],
   );
 
+  const kafkaTypeIds = useMemo(
+    () => new Set(labelItems.filter((item) => item.name === LABEL_KAFKA).map((item) => item.id)),
+    [labelItems],
+  );
+
   const displayConnections = useMemo(
     () => sortConnectionsByTypeOrder(connections, labelOrderMap),
     [connections, labelOrderMap],
@@ -112,6 +117,7 @@ export default function ConnectionSection({
           isDatabaseType={databaseTypeIds.has(conn.type)}
           isTerminalType={terminalTypeIds.has(conn.type)}
           isMqttType={mqttTypeIds.has(conn.type)}
+          isKafkaType={kafkaTypeIds.has(conn.type)}
         />
       ))}
     </div>

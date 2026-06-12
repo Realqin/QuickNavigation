@@ -51,7 +51,15 @@ LABEL_DATABASE = "数据库"
 LABEL_TERMINAL = "终端模拟器"
 LABEL_REDIS = "Redis"
 LABEL_MQTT = "MQTT"
-SYSTEM_LABEL_NAMES = {LABEL_OTHER, LABEL_DATABASE, LABEL_TERMINAL, LABEL_REDIS, LABEL_MQTT}
+LABEL_KAFKA = "Kafka"
+SYSTEM_LABEL_NAMES = {
+    LABEL_OTHER,
+    LABEL_DATABASE,
+    LABEL_TERMINAL,
+    LABEL_REDIS,
+    LABEL_MQTT,
+    LABEL_KAFKA,
+}
 
 FILTER_EMPTY = 0  # 筛选「其他」：项目/环境未填写
 
@@ -184,6 +192,8 @@ def get_label_kind(db: Session, type_id: int) -> str:
         return "redis"
     if item.name == LABEL_MQTT:
         return "mqtt"
+    if item.name == LABEL_KAFKA:
+        return "kafka"
     return "other"
 
 
@@ -208,6 +218,11 @@ def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
     if kind == "mqtt":
         port = port or 8083
         return f"mqtt://{host}:{port}"
+    if kind == "kafka":
+        from app.kafka_broker_utils import format_kafka_brokers
+
+        brokers = format_kafka_brokers(host, port)
+        return f"kafka://{brokers}" if brokers else ""
     return str(data.get("url") or "").strip()
 
 
@@ -219,7 +234,14 @@ def _validate_connection_by_kind(kind: str, data: dict[str, Any], *, require_pas
 
     if not str(data.get("host") or "").strip():
         raise HTTPException(status_code=400, detail="请输入 IP")
-    if data.get("port") is None:
+    if kind == "kafka":
+        from app.kafka_broker_utils import validate_kafka_brokers
+
+        try:
+            validate_kafka_brokers(data.get("host"), data.get("port"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif data.get("port") is None:
         raise HTTPException(status_code=400, detail="请输入端口")
 
     if kind == "database":
@@ -246,6 +268,13 @@ def _clear_connection_fields_for_kind(kind: str, data: dict[str, Any]) -> dict[s
         payload["username"] = None
     if kind == "mqtt":
         payload["mqtt_ws_path"] = str(payload.get("mqtt_ws_path") or "/mqtt").strip() or "/mqtt"
+    if kind == "kafka":
+        from app.kafka_broker_utils import normalize_kafka_brokers_field
+
+        brokers_text, _ = normalize_kafka_brokers_field(payload.get("host"), payload.get("port"))
+        payload["host"] = brokers_text or None
+        payload["port"] = None
+        payload["username"] = str(payload.get("username") or "").strip() or None
     if kind != "mqtt":
         payload["mqtt_subscriptions"] = []
         payload["mqtt_ws_path"] = None
@@ -946,6 +975,15 @@ def _mqtt_label_ids(db: Session) -> set[int]:
 
 def connection_is_mqtt_type(db: Session, conn: Connection) -> bool:
     return conn.type in _mqtt_label_ids(db)
+
+
+def _kafka_label_ids(db: Session) -> set[int]:
+    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
+    return {item.id for item in items if item.name == LABEL_KAFKA}
+
+
+def connection_is_kafka_type(db: Session, conn: Connection) -> bool:
+    return conn.type in _kafka_label_ids(db)
 
 
 def _dict_ids_display(db: Session, dict_type: str, ids: list | None) -> str:

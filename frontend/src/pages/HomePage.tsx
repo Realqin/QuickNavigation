@@ -9,6 +9,7 @@ import {
   fetchLogs,
   markLogRead,
   openOmnidbConsole,
+  openRedpandaConsole,
   openSshwiftyConsole,
   reorderConnections,
   updateConnection,
@@ -27,6 +28,7 @@ import {
 import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
 import { openOmnidbInNewTab } from '../utils/omnidb';
 import { openMqttConsole } from '../utils/mqttNavigation';
+import { openRedpandaInNewTab } from '../utils/redpanda';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
 import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
@@ -212,7 +214,10 @@ export default function HomePage() {
     }
   };
 
-  const handleOpenEmbedded = async (conn: Connection, kind: 'database' | 'terminal' | 'mqtt') => {
+  const handleOpenEmbedded = async (
+    conn: Connection,
+    kind: 'database' | 'terminal' | 'mqtt' | 'kafka',
+  ) => {
     if (kind === 'mqtt') {
       try {
         openMqttConsole(conn.id);
@@ -220,6 +225,22 @@ export default function HomePage() {
         if (error instanceof Error && error.message === 'browser blocked popup') {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
         }
+      }
+      return;
+    }
+
+    if (kind === 'kafka') {
+      const hide = message.loading('正在同步 Kafka 集群并打开 Redpanda Console...', 0);
+      try {
+        await openRedpandaInNewTab(openRedpandaConsole, conn.id);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'browser blocked popup') {
+          message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
+        } else {
+          message.error('打开 Redpanda Console 失败，请确认服务已启动（端口 8082）');
+        }
+      } finally {
+        hide();
       }
       return;
     }
