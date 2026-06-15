@@ -110,6 +110,18 @@ a {
 
 
 
+.app-content--home {
+
+  height: calc(100vh - 56px);
+
+  min-height: calc(100vh - 56px);
+
+  overflow: hidden;
+
+}
+
+
+
 .app-tabs {
 
   flex: 1;
@@ -150,6 +162,66 @@ a {
 
 
 
+.app-tabs--home {
+
+  flex: 1;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+}
+
+
+
+.app-tabs--home > .ant-tabs-nav {
+
+  flex-shrink: 0;
+
+}
+
+
+
+.app-tabs--home > .ant-tabs-content-holder {
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
+.app-tabs--home .ant-tabs-content {
+
+  flex: 1;
+
+  min-height: 0;
+
+  height: 100%;
+
+}
+
+
+
+.app-tabs--home .ant-tabs-tabpane-active {
+
+  height: 100%;
+
+}
+
+
+
 .app-tabs .ant-tabs-tabpane {
 
   height: 100%;
@@ -161,6 +233,970 @@ a {
 .tab-pane-body {
 
   min-height: calc(100vh - 56px - 46px);
+
+}
+
+
+
+.app-tabs--home .tab-pane-body {
+
+  height: 100%;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
+.embedded-console-page {
+
+  height: calc(100vh - 56px - 46px);
+
+  display: flex;
+
+  flex-direction: column;
+
+  background: #fff;
+
+}
+
+
+
+.embedded-console-page--loading {
+
+  align-items: center;
+
+  justify-content: center;
+
+}
+
+
+
+.embedded-console-frame {
+
+  flex: 1;
+
+  width: 100%;
+
+  border: none;
+
+  min-height: 0;
+
+}
+
+
+
+.mqtt-method-page {
+
+  display: flex;
+
+  height: calc(100vh - 56px - 46px);
+
+  min-height: 0;
+
+  background: #fff;
+
+}
+
+
+
+.mqtt-method-page__sidebar {
+
+  width: 340px;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  border-right: 1px solid #e5e7eb;
+
+  background: #fafafa;
+
+}
+
+
+
+.mqtt-method-page__sidebar-head {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 12px 12px 8px;
+
+}
+
+
+
+.mqtt-method-page__toolbar {
+
+  padding: 0 12px 10px;
+
+}
+
+
+
+.mqtt-method-page__sidebar-body {
+
+  flex: 1;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
+.mqtt-method-page__connections-panel {
+
+  flex: 0 0 calc(var(--mqtt-split-ratio, 0.45) * (100% - 6px));
+
+  min-height: 108px;
+
+  max-height: calc(78% - 6px);
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+}
+
+
+
+.mqtt-method-page__splitter {
+
+  flex-shrink: 0;
+
+  height: 6px;
+
+  cursor: row-resize;
+
+  background: linear-gradient(180deg, #f5f5f5 0%, #ebebeb 50%, #f5f5f5 100%);
+
+  border-top: 1px solid #e5e7eb;
+
+  border-bottom: 1px solid #e5e7eb;
+
+  position: relative;
+
+}
+
+
+
+.mqtt-method-page__splitter::after {
+
+  content: '';
+
+  position: absolute;
+
+  left: 50%;
+
+  top: 50%;
+
+  width: 36px;
+
+  height: 2px;
+
+  border-radius: 999px;
+
+  background: #bfbfbf;
+
+  transform: translate(-50%, -50%);
+
+  box-shadow: 0 -3px 0 #bfbfbf, 0 3px 0 #bfbfbf;
+
+}
+
+
+
+.mqtt-method-page__splitter:hover,
+.mqtt-method-page--split-dragging .mqtt-method-page__splitter {
+
+  background: linear-gradient(180deg, #eef6ff 0%, #d6e8ff 50%, #eef6ff 100%);
+
+}
+
+
+
+.mqtt-method-page__subscriptions-wrap {
+
+  flex: 1 1 auto;
+
+  min-height: 108px;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+}
+
+
+
+.mqtt-method-page--split-dragging,
+.mqtt-method-page--split-dragging * {
+
+  cursor: row-resize !important;
+
+  user-select: none !important;
+
+}
+
+
+
+.mqtt-method-page__panel-title {
+
+  padding: 8px 12px 6px;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll {
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow: auto;
+
+  padding: 0 8px 10px;
+
+}
+
+
+
+.mqtt-method-page__subscriptions-panel {
+
+  flex: 1;
+
+  min-height: 0;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  padding: 8px 12px 12px;
+
+  transition: opacity 0.2s ease, filter 0.2s ease;
+
+}
+
+
+
+.mqtt-method-page__subscriptions-panel.is-muted {
+
+  opacity: 0.62;
+
+  filter: grayscale(0.15);
+
+}
+
+
+
+.mqtt-method-page__subscriptions-panel.is-disabled {
+
+  opacity: 0.72;
+
+}
+
+
+
+.mqtt-method-page__subscriptions-head {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+  margin-bottom: 8px;
+
+}
+
+
+
+.mqtt-method-page__subscriptions-subtitle {
+
+  font-size: 11px;
+
+}
+
+
+
+.mqtt-method-page__subscriptions-scroll {
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow: auto;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 10px;
+
+}
+
+
+
+.mqtt-method-page__subscription-add {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 6px;
+
+  width: 100%;
+
+}
+
+
+
+.mqtt-method-page__subscription-add .ant-input {
+
+  flex: 1;
+
+  min-width: 0;
+
+}
+
+
+
+.mqtt-method-page__subscription-add .ant-btn {
+
+  flex-shrink: 0;
+
+  padding-inline: 10px;
+
+}
+
+
+
+.mqtt-method-page__subscription-edit {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 10px;
+
+}
+
+
+
+.mqtt-method-page__subscription-text {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+  min-width: 0;
+
+  flex: 1;
+
+}
+
+
+
+.mqtt-method-page__subscription-name {
+
+  font-size: 11px;
+
+  color: rgba(0, 0, 0, 0.45);
+
+  word-break: break-all;
+
+}
+
+
+
+.mqtt-method-page__tree-loading {
+
+  display: flex;
+
+  justify-content: center;
+
+  padding: 24px 0;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree {
+
+  width: 100%;
+
+  background: transparent;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-list,
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-list-holder,
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-list-holder-inner {
+
+  width: 100%;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-treenode {
+
+  width: 100%;
+
+  padding: 2px 0;
+
+  align-items: stretch;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-indent,
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-switcher {
+
+  display: none;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-node-content-wrapper {
+
+  flex: 1;
+
+  min-width: 0;
+
+  width: 100%;
+
+  margin-left: 0 !important;
+
+  padding: 6px 8px;
+
+  border-radius: 8px;
+
+  line-height: 1.4;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-node-content-wrapper:hover {
+
+  background: rgba(0, 0, 0, 0.04);
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+
+  background: #e6f4ff !important;
+
+}
+
+
+
+.mqtt-method-page__connections-scroll .ant-tree .ant-tree-title {
+
+  width: 100%;
+
+}
+
+
+
+.mqtt-method-page__tree-node {
+
+  display: flex;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  gap: 4px;
+
+  width: 100%;
+
+  min-width: 0;
+
+}
+
+
+
+.mqtt-method-page__tree-main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+}
+
+
+
+.mqtt-method-page__tree-name {
+
+  font-size: 13px;
+
+  color: rgba(0, 0, 0, 0.88);
+
+}
+
+
+
+.mqtt-method-page__tree-brokers {
+
+  font-size: 11px;
+
+  color: rgba(0, 0, 0, 0.45);
+
+  word-break: break-all;
+
+}
+
+
+
+.mqtt-method-page__tree-actions {
+
+  display: flex;
+
+  flex-shrink: 0;
+
+  align-items: center;
+
+  gap: 0;
+
+  opacity: 0;
+
+  pointer-events: none;
+
+  transition: opacity 0.15s ease;
+
+}
+
+
+
+.mqtt-method-page__tree-node:hover .mqtt-method-page__tree-actions,
+.mqtt-method-page__tree-actions:focus-within {
+
+  opacity: 1;
+
+  pointer-events: auto;
+
+}
+
+
+
+.mqtt-method-page__tree-actions .ant-btn {
+
+  width: 24px;
+
+  height: 24px;
+
+  padding: 0;
+
+}
+
+
+
+.mqtt-method-page__main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+  background: #f5f7fb;
+
+}
+
+
+
+.mqtt-method-page__main .mqtt-console {
+
+  flex: 1;
+
+  min-height: 0;
+
+  height: 100%;
+
+}
+
+
+
+.mqtt-method-page__main .mqtt-console__main-row {
+
+  min-height: calc(100vh - 56px - 150px);
+
+}
+
+
+
+.mqtt-method-page__main .mqtt-console__subscription-panel .ant-card-body {
+
+  max-height: calc(100vh - 56px - 520px);
+
+}
+
+
+
+.mqtt-method-page__main .mqtt-console__messages-card .ant-card-body {
+
+  height: calc(100vh - 56px - 180px);
+
+  min-height: 360px;
+
+}
+
+
+
+.mqtt-method-page__placeholder {
+
+  flex: 1;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  background: #f5f7fb;
+
+}
+
+
+
+.kafka-method-page {
+
+  display: flex;
+
+  position: relative;
+
+  height: calc(100vh - 56px - 46px);
+
+  min-height: 0;
+
+  background: #fff;
+
+}
+
+
+
+.kafka-method-page__sidebar {
+
+  width: 300px;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  border-right: 1px solid #e5e7eb;
+
+  background: #fafafa;
+
+  overflow: hidden;
+
+  transition: width 0.2s ease, opacity 0.2s ease;
+
+}
+
+
+
+.kafka-method-page--sidebar-collapsed .kafka-method-page__sidebar {
+
+  width: 0;
+
+  opacity: 0;
+
+  border-right: none;
+
+  pointer-events: none;
+
+}
+
+
+
+.kafka-method-page__sidebar-expand {
+
+  position: absolute;
+
+  top: 10px;
+
+  left: 8px;
+
+  z-index: 2;
+
+  width: 32px;
+
+  height: 32px;
+
+  border: 1px solid #e5e7eb;
+
+  border-radius: 6px;
+
+  background: #fafafa;
+
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+
+}
+
+
+
+.kafka-method-page__sidebar-head {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 12px 12px 8px;
+
+}
+
+
+
+.kafka-method-page__toolbar {
+
+  padding: 0 12px 10px;
+
+}
+
+
+
+.kafka-method-page__tree-wrap {
+
+  flex: 1;
+
+  overflow: auto;
+
+  padding: 0 8px 12px;
+
+}
+
+
+
+.kafka-method-page__tree-loading {
+
+  display: flex;
+
+  justify-content: center;
+
+  padding: 24px 0;
+
+}
+
+
+
+.kafka-method-page__tree-wrap .ant-tree .ant-tree-treenode {
+
+  width: 100%;
+
+  padding: 2px 0;
+
+}
+
+
+
+.kafka-method-page__tree-wrap .ant-tree .ant-tree-node-content-wrapper {
+
+  flex: 1;
+
+  min-width: 0;
+
+}
+
+
+
+.kafka-method-page__tree-wrap .ant-tree .ant-tree-title {
+
+  width: 100%;
+
+}
+
+
+
+.kafka-method-page__tree-node {
+
+  display: flex;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  gap: 4px;
+
+  width: 100%;
+
+  min-width: 0;
+
+}
+
+
+
+.kafka-method-page__tree-main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+}
+
+
+
+.kafka-method-page__tree-name {
+
+  font-size: 13px;
+
+  color: rgba(0, 0, 0, 0.88);
+
+}
+
+
+
+.kafka-method-page__tree-brokers {
+
+  font-size: 11px;
+
+  color: rgba(0, 0, 0, 0.45);
+
+  word-break: break-all;
+
+}
+
+
+
+.kafka-method-page__tree-actions {
+
+  display: flex;
+
+  flex-shrink: 0;
+
+  align-items: center;
+
+  gap: 0;
+
+  opacity: 0;
+
+  pointer-events: none;
+
+  transition: opacity 0.15s ease;
+
+}
+
+
+
+.kafka-method-page__tree-node:hover .kafka-method-page__tree-actions,
+.kafka-method-page__tree-actions:focus-within {
+
+  opacity: 1;
+
+  pointer-events: auto;
+
+}
+
+
+
+.kafka-method-page__tree-actions .ant-btn {
+
+  width: 24px;
+
+  height: 24px;
+
+  padding: 0;
+
+}
+
+
+
+.kafka-method-page__main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+}
+
+
+
+.kafka-method-page__main .embedded-console-frame {
+
+  flex: 1;
+
+  width: 100%;
+
+  border: none;
+
+  min-height: 0;
+
+}
+
+
+
+.kafka-method-page__placeholder {
+
+  flex: 1;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  background: #f5f7fb;
 
 }
 
@@ -194,15 +1230,167 @@ a {
 
 
 
-/* ---- Home page ---- */
+/* ---- Connections page ---- */
 
-.home-page {
+.connections-page__filters {
+
+  margin-bottom: 16px;
+
+  flex-shrink: 0;
+
+}
+
+
+
+.connections-page__table .ant-table-thead > tr > th {
+
+  position: sticky;
+
+  top: 0;
+
+  z-index: 2;
+
+}
+
+
+
+.connections-name-cell {
+
+  min-width: 0;
+
+}
+
+
+
+.connections-url-cell {
+
+  min-width: 0;
+
+  word-break: break-all;
+
+}
+
+
+
+.connections-sub-links {
+
+  margin-top: 8px;
+
+  padding-top: 8px;
+
+  border-top: 1px dashed #e5e7eb;
 
   display: flex;
 
   flex-direction: column;
 
-  min-height: calc(100vh - 56px - 46px);
+  gap: 6px;
+
+}
+
+
+
+.connections-sub-link-item {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  flex-wrap: wrap;
+
+  font-size: 12px;
+
+}
+
+
+
+.connections-sub-link-item__name {
+
+  flex-shrink: 0;
+
+  max-width: 120px;
+
+}
+
+
+
+.connections-sub-link-item__url {
+
+  flex: 1;
+
+  min-width: 0;
+
+  word-break: break-all;
+
+}
+
+
+
+.connections-page__table .connections-row--child > td {
+
+  background: #fafbfc;
+
+}
+
+
+
+.connections-page__pagination {
+
+  display: flex;
+
+  justify-content: flex-end;
+
+  margin-top: 16px;
+
+}
+
+
+
+/* ---- Home page ---- */
+
+.home-page {
+
+  flex: 1;
+
+  min-height: 0;
+
+  height: 100%;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+  padding: 16px 0 0;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.home-page > .tab-page-toolbar {
+
+  flex-shrink: 0;
+
+  margin-bottom: 12px;
+
+  padding-inline: 20px;
+
+}
+
+
+
+.home-page__main {
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow: hidden;
 
 }
 
@@ -210,7 +1398,11 @@ a {
 
 .home-layout {
 
-  flex: 1;
+  height: 100%;
+
+  min-height: 0;
+
+  overflow: hidden;
 
   background: transparent;
 
@@ -218,7 +1410,27 @@ a {
 
 
 
+.home-layout.ant-layout {
+
+  display: flex;
+
+  align-items: stretch;
+
+}
+
+
+
 .home-content {
+
+  flex: 1;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow-y: auto;
+
+  overflow-x: hidden;
 
   padding: 0 16px 16px;
 
@@ -230,11 +1442,25 @@ a {
 
 .home-log-sider {
 
+  flex-shrink: 0;
+
+  align-self: stretch;
+
+  height: 100% !important;
+
+  max-height: 100%;
+
   border-left: 1px solid #e5e7eb;
 
   padding: 0 12px 12px;
 
   background: #fff !important;
+
+  overflow: hidden;
+
+  display: flex;
+
+  flex-direction: column;
 
 }
 
@@ -342,9 +1568,31 @@ a {
 
 .log-panel {
 
-  height: calc(100vh - 56px - 46px - 60px);
+  flex: 1;
 
-  overflow: auto;
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+}
+
+
+
+.log-panel__scroll {
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow-y: auto;
+
+  overflow-x: hidden;
+
+  padding-right: 4px;
 
 }
 
@@ -352,11 +1600,17 @@ a {
 
 .log-item {
 
-  cursor: pointer;
-
   border-radius: 8px;
 
   padding-inline: 8px !important;
+
+}
+
+
+
+.log-item--clickable {
+
+  cursor: pointer;
 
 }
 

@@ -1,22 +1,51 @@
 import {
+  ApiOutlined,
   BellOutlined,
   BookOutlined,
+  CloudServerOutlined,
+  CodeOutlined,
+  DatabaseOutlined,
   HomeOutlined,
   LinkOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import { Layout, Menu, Tabs, Typography } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
+import ConnectionMethodMqttPage from '../pages/connection-methods/ConnectionMethodMqttPage';
+import EmbeddedConsolePage from '../pages/connection-methods/EmbeddedConsolePage';
+import KafkaMethodPage from '../pages/connection-methods/KafkaMethodPage';
+import OmnidbMethodPage from '../pages/connection-methods/OmnidbMethodPage';
 import ConnectionsPage from '../pages/ConnectionsPage';
 import DictPage from '../pages/DictPage';
 import HomePage from '../pages/HomePage';
 import LogsPage from '../pages/LogsPage';
-import { createTab, PAGE_LABELS, type AppTab, type PageType } from '../types/tabs';
+import {
+  CONNECTION_METHOD_MENU_KEY,
+  createTab,
+  isConnectionMethodType,
+  PAGE_LABELS,
+  type AppTab,
+  type PageType,
+} from '../types/tabs';
 
 const { Header, Sider, Content } = Layout;
 
-const MENU_ITEMS = [
+const MENU_ITEMS: MenuProps['items'] = [
   { key: 'home', icon: <HomeOutlined />, label: PAGE_LABELS.home },
   { key: 'connections', icon: <LinkOutlined />, label: PAGE_LABELS.connections },
+  {
+    key: CONNECTION_METHOD_MENU_KEY,
+    icon: <ApiOutlined />,
+    label: '连接方式',
+    children: [
+      { key: 'methodDatabase', icon: <DatabaseOutlined />, label: PAGE_LABELS.methodDatabase },
+      { key: 'methodTerminal', icon: <CodeOutlined />, label: PAGE_LABELS.methodTerminal },
+      { key: 'methodRedis', icon: <CloudServerOutlined />, label: PAGE_LABELS.methodRedis },
+      { key: 'methodMqtt', icon: <MessageOutlined />, label: PAGE_LABELS.methodMqtt },
+      { key: 'methodKafka', icon: <ApiOutlined />, label: PAGE_LABELS.methodKafka },
+    ],
+  },
   { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
   { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
 ];
@@ -31,6 +60,28 @@ function renderTabContent(tab: AppTab) {
       return <LogsPage />;
     case 'dict':
       return <DictPage />;
+    case 'methodDatabase':
+      return <OmnidbMethodPage />;
+    case 'methodTerminal':
+      return (
+        <EmbeddedConsolePage
+          configKey="sshwifty_base_url"
+          defaultPort={8182}
+          emptyHint="无法加载终端控制台，请确认 Sshwifty 已启动（端口 8182）"
+        />
+      );
+    case 'methodRedis':
+      return (
+        <EmbeddedConsolePage
+          configKey="redisinsight_base_url"
+          defaultPort={5540}
+          emptyHint="无法加载 Redis 控制台，请确认 RedisInsight 已启动（端口 5540）"
+        />
+      );
+    case 'methodMqtt':
+      return <ConnectionMethodMqttPage />;
+    case 'methodKafka':
+      return <KafkaMethodPage />;
     default:
       return null;
   }
@@ -39,6 +90,7 @@ function renderTabContent(tab: AppTab) {
 export default function MainLayout() {
   const [tabs, setTabs] = useState<AppTab[]>(() => [createTab('home')]);
   const [activeKey, setActiveKey] = useState<PageType>('home');
+  const [menuOpenKeys, setMenuOpenKeys] = useState<string[]>([]);
 
   const openTab = useCallback((type: PageType) => {
     setTabs((prev) => {
@@ -50,6 +102,11 @@ export default function MainLayout() {
       setActiveKey(type);
       return [...prev, createTab(type)];
     });
+    if (isConnectionMethodType(type)) {
+      setMenuOpenKeys((prev) =>
+        prev.includes(CONNECTION_METHOD_MENU_KEY) ? prev : [...prev, CONNECTION_METHOD_MENU_KEY],
+      );
+    }
   }, []);
 
   const closeTab = useCallback(
@@ -73,6 +130,13 @@ export default function MainLayout() {
     () => tabs.find((t) => t.key === activeKey)?.type ?? 'home',
     [tabs, activeKey],
   );
+
+  const selectedMenuKeys = useMemo(() => {
+    if (isConnectionMethodType(activeTabType)) {
+      return [activeTabType];
+    }
+    return [activeTabType];
+  }, [activeTabType]);
 
   const tabItems = useMemo(
     () =>
@@ -101,16 +165,21 @@ export default function MainLayout() {
         <Sider width={200} className="app-sider" theme="light">
           <Menu
             mode="inline"
-            selectedKeys={[activeTabType]}
+            selectedKeys={selectedMenuKeys}
+            openKeys={menuOpenKeys}
+            onOpenChange={setMenuOpenKeys}
             items={MENU_ITEMS}
-            onClick={({ key }) => openTab(key as PageType)}
+            onClick={({ key }) => {
+              if (key === CONNECTION_METHOD_MENU_KEY) return;
+              openTab(key as PageType);
+            }}
           />
         </Sider>
 
         <Layout className="app-main">
-          <Content className="app-content">
+          <Content className={`app-content${activeTabType === 'home' ? ' app-content--home' : ''}`}>
             <Tabs
-              className="app-tabs"
+              className={`app-tabs${activeTabType === 'home' ? ' app-tabs--home' : ''}`}
               type="editable-card"
               hideAdd
               activeKey={activeKey}

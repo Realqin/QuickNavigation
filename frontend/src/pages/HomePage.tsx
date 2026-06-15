@@ -17,7 +17,6 @@ import {
 } from '../api';
 import ActivityLogPanel from '../components/ActivityLogPanel';
 import ConnectionFormModal from '../components/ConnectionFormModal';
-import SchemaChangeModal from '../components/SchemaChangeModal';
 import ConnectionSection from '../components/ConnectionSection';
 import {
   buildLabelColorMap,
@@ -26,13 +25,13 @@ import {
   dictToOptions,
   useDict,
 } from '../hooks/useDict';
+import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
 import type { ActivityLog, Connection, ConnectionFormValues, HomeGroup } from '../types';
 import { openOmnidbInNewTab } from '../utils/omnidb';
 import { openMqttConsole } from '../utils/mqttNavigation';
 import { openRedpandaInNewTab } from '../utils/redpanda';
 import { openRedisinsightInNewTab } from '../utils/redisinsight';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
-import { isSchemaChangeLog } from '../utils/schemaChangeLog';
 
 const { Content, Sider } = Layout;
 
@@ -78,8 +77,7 @@ export default function HomePage() {
   const [editMode, setEditMode] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
-  const [schemaChangeLog, setSchemaChangeLog] = useState<ActivityLog | null>(null);
-  const [schemaChangeOpen, setSchemaChangeOpen] = useState(false);
+  const { openActivityLogDetail, detailModals } = useActivityLogDetail();
   const resolvedProject = useMemo(() => {
     if (project && projectOptions.some((o) => o.value === project)) return project;
     return projectOptions[0]?.value ?? null;
@@ -193,10 +191,7 @@ export default function HomePage() {
   };
 
   const handleLogClick = async (log: ActivityLog) => {
-    if (isSchemaChangeLog(log)) {
-      setSchemaChangeLog(log);
-      setSchemaChangeOpen(true);
-    }
+    openActivityLogDetail(log);
     if (log.is_read) return;
     try {
       const updated = await markLogRead(log.id);
@@ -221,12 +216,17 @@ export default function HomePage() {
     kind: 'database' | 'terminal' | 'mqtt' | 'kafka' | 'redis',
   ) => {
     if (kind === 'mqtt') {
+      const hide = message.loading('正在打开 MQTT 控制台...', 0);
       try {
-        openMqttConsole(conn.id);
+        await openMqttConsole(conn.id);
       } catch (error) {
         if (error instanceof Error && error.message === 'browser blocked popup') {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
+        } else {
+          message.error('打开 MQTT 控制台失败');
         }
+      } finally {
+        hide();
       }
       return;
     }
@@ -351,8 +351,9 @@ export default function HomePage() {
         </Space>
       </div>
 
-      <Layout className="home-layout">
-        <Content className="home-content">
+      <div className="home-page__main">
+        <Layout className="home-layout">
+          <Content className="home-content">
           {groups.map((group, index) => (
             <div key={group.id}>
               {index > 0 ? <div style={{ height: 16 }} /> : null}
@@ -396,7 +397,8 @@ export default function HomePage() {
         <Sider width={300} className="home-log-sider" theme="light">
           <ActivityLogPanel logs={logs} onItemClick={handleLogClick} />
         </Sider>
-      </Layout>
+        </Layout>
+      </div>
 
       <ConnectionFormModal
         open={modalOpen}
@@ -416,14 +418,7 @@ export default function HomePage() {
         }}
         onSubmit={handleSubmit}
       />
-      <SchemaChangeModal
-        log={schemaChangeLog}
-        open={schemaChangeOpen}
-        onClose={() => {
-          setSchemaChangeOpen(false);
-          setSchemaChangeLog(null);
-        }}
-      />
+      {detailModals}
     </div>
   );
 }

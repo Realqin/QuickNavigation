@@ -338,6 +338,7 @@ class GitlabSubscriptionLinkOut(BaseModel):
     enabled: bool
     link_kind: str = "gitlab"
     webhook_secret: str | None = None
+    last_updated_at: datetime | None = None
 
 
 class GitlabSubscriptionTreeOut(BaseModel):
@@ -457,34 +458,138 @@ class SchemaScanResultOut(BaseModel):
     message: str
 
 
+class OmnidbMenuUrlOut(BaseModel):
+    url: str
+
+
 class PublicConfigOut(BaseModel):
     webhook_base_url: str
     omnidb_base_url: str = ""
+    omnidb_login_url: str = ""
     sshwifty_base_url: str = ""
     redpanda_base_url: str = ""
     redisinsight_base_url: str = ""
+
+
+class EmbedSessionOut(BaseModel):
+    session_id: str
+    console_type: str
+    connection_id: int
+    connection_name: str
+    embed_url: str
+    is_temporary: bool = True
 
 
 class OmnidbOpenOut(BaseModel):
     embed_url: str
     connection_name: str
     omnidb_connection_id: int | None = None
+    session_id: str | None = None
 
 
 class SshwiftyOpenOut(BaseModel):
     embed_url: str
     connection_name: str
+    session_id: str | None = None
+
+
+class KafkaConsoleConnectionOut(BaseModel):
+    id: int
+    name: str
+    brokers: str
+    username: str | None = None
+    password_set: bool = False
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class KafkaConsoleConnectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    brokers: str = Field(min_length=1, max_length=512)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class KafkaConsoleConnectionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    brokers: str | None = Field(default=None, min_length=1, max_length=512)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class KafkaConsoleConnectionTestRequest(BaseModel):
+    brokers: str = Field(min_length=1, max_length=512)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class MqttConsoleConnectionOut(BaseModel):
+    id: int
+    name: str
+    host: str
+    port: int
+    username: str | None = None
+    password_set: bool = False
+    mqtt_subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MqttConsoleConnectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    host: str = Field(min_length=1, max_length=256)
+    port: int = Field(default=1883, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class MqttConsoleConnectionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    host: str | None = Field(default=None, min_length=1, max_length=256)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class MqttConsoleConnectionTestRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=256)
+    port: int = Field(default=1883, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=512)
+
+
+class MqttConsoleSubscriptionsUpdate(BaseModel):
+    subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
+
+
+class MqttConsoleConnectOut(BaseModel):
+    connection_id: int
+    connection_name: str
+    host: str
+    port: int
+    broker_url: str
+    username: str = ""
+    password: str = ""
+    subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
 
 
 class RedpandaOpenOut(BaseModel):
     embed_url: str
     connection_name: str
+    session_id: str | None = None
 
 
 class RedisinsightOpenOut(BaseModel):
     embed_url: str
     connection_name: str
     database_id: str | None = None
+    session_id: str | None = None
 
 
 class MqttConsoleConfigOut(BaseModel):
@@ -492,12 +597,17 @@ class MqttConsoleConfigOut(BaseModel):
     connection_name: str
     host: str
     port: int
+    broker_url: str = ""
     ws_path: str
     username: str = ""
     password: str = ""
     subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
     use_bridge: bool = True
     bridge_path: str = ""
+
+
+class MqttOpenOut(MqttConsoleConfigOut):
+    session_id: str | None = None
 
 
 class RepoAccessSettingsOut(BaseModel):

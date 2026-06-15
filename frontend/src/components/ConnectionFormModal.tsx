@@ -88,9 +88,9 @@ function TypeFields({
       <>
         <Form.Item
           name="host"
-          label="主机"
-          rules={[{ required: true, message: '请输入主机' }]}
-          extra="仅 IP 或域名，如 10.100.0.230（MQTTX 的 mqtt:// 前缀可省略）"
+          label="Broker 地址"
+          rules={[{ required: true, message: '请输入 Broker 地址' }]}
+          extra="仅 IP 或域名，连接格式为 mqtt://主机:端口，如 mqtt://10.100.0.230:1883"
         >
           <Input placeholder="10.100.0.230" />
         </Form.Item>
@@ -98,17 +98,9 @@ function TypeFields({
           name="port"
           label="端口"
           rules={[{ required: true, message: '请输入端口' }]}
-          extra="与 Broker WebSocket 监听端口一致（如 1883 或 8083），非 MQTTX TCP 专用端口时请核对 Broker 文档"
+          extra="MQTT TCP 端口，默认 1883"
         >
           <InputNumber min={1} max={65535} className="connection-form-modal__port" />
-        </Form.Item>
-        <Form.Item
-          name="mqtt_ws_path"
-          label="挂载路径"
-          initialValue="/mqtt"
-          extra="WebSocket 路径，常见 /mqtt（不是 /ws 或 /wss）"
-        >
-          <Input placeholder="/mqtt" />
         </Form.Item>
         <Form.Item name="username" label="用户名">
           <Input placeholder="可选" />

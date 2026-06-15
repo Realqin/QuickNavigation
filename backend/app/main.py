@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine, SessionLocal
-from app.models import Connection, DictItem
-from app.mqtt_bridge_service import run_mqtt_bridge
+from app.models import Connection, DictItem, EmbedConsoleSession
+from app.mqtt_bridge_service import run_mqtt_bridge, run_mqtt_bridge_session
 from app.ping_scheduler import connection_ping_scheduler
 from app.schema_monitor_scheduler import schema_monitor_scheduler
 from app.routers import api, webhooks
@@ -438,6 +438,46 @@ def migrate_connection_endpoint_fields() -> None:
                 conn.execute(text(f"ALTER TABLE connections ADD COLUMN {column_name} {column_type}"))
 
 
+def migrate_embed_console_sessions() -> None:
+    inspector = inspect(engine)
+    if inspector.has_table("embed_console_sessions"):
+        return
+    Base.metadata.tables["embed_console_sessions"].create(bind=engine)
+
+
+def migrate_kafka_console_connections() -> None:
+    inspector = inspect(engine)
+    if inspector.has_table("kafka_console_connections"):
+        return
+    Base.metadata.tables["kafka_console_connections"].create(bind=engine)
+
+
+def migrate_mqtt_console_connections() -> None:
+    inspector = inspect(engine)
+    if inspector.has_table("mqtt_console_connections"):
+        return
+    Base.metadata.tables["mqtt_console_connections"].create(bind=engine)
+
+
+def migrate_mqtt_console_subscriptions() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("mqtt_console_connections"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("mqtt_console_connections")}
+    if "mqtt_subscriptions" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE mqtt_console_connections ADD COLUMN mqtt_subscriptions JSON NULL")
+        )
+        conn.execute(
+            text(
+                "UPDATE mqtt_console_connections SET mqtt_subscriptions = JSON_ARRAY() "
+                "WHERE mqtt_subscriptions IS NULL"
+            )
+        )
+
+
 def migrate_mqtt_fields() -> None:
     inspector = inspect(engine)
     if not inspector.has_table("connections"):
@@ -622,6 +662,10 @@ def init_db() -> None:
     migrate_subscription_link_enabled()
     migrate_connection_endpoint_fields()
     migrate_mqtt_fields()
+    migrate_embed_console_sessions()
+    migrate_kafka_console_connections()
+    migrate_mqtt_console_connections()
+    migrate_mqtt_console_subscriptions()
     db = SessionLocal()
     try:
         seed_dict_items(db)
@@ -649,6 +693,49 @@ async def websocket_logs(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/mqtt/manual")
+async def websocket_mqtt_manual_bridge(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        data = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+    except TimeoutError:
+        await websocket.send_json(
+            {"type": "status", "status": "error", "message": "等待连接参数超时"}
+        )
+        return
+    except Exception:
+        await websocket.send_json(
+            {"type": "status", "status": "error", "message": "连接参数无效"}
+        )
+        return
+
+    if data.get("type") != "connect":
+        await websocket.send_json(
+            {"type": "status", "status": "error", "message": "首条消息须为 connect"}
+        )
+        return
+
+    host = str(data.get("host") or "").strip()
+    if not host:
+        await websocket.send_json({"type": "status", "status": "error", "message": "未配置主机"})
+        return
+
+    port = int(data.get("port") or 1883)
+    username = str(data.get("username") or "").strip() or None
+    password = str(data.get("password") or "").strip() or None
+
+    await run_mqtt_bridge_session(
+        websocket,
+        hostname=host,
+        port=port,
+        username=username,
+        password=password,
+        preset_topics=[],
+        bridge_id="manual",
+        accept_websocket=False,
+    )
 
 
 @app.websocket("/ws/mqtt/{connection_id}")

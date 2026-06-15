@@ -2,6 +2,8 @@ import json
 
 import secrets
 
+from datetime import datetime
+
 from typing import Any
 
 
@@ -216,7 +218,7 @@ def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
         port = port or 6379
         return f"redis://{host}:{port}"
     if kind == "mqtt":
-        port = port or 8083
+        port = port or 1883
         return f"mqtt://{host}:{port}"
     if kind == "kafka":
         from app.kafka_broker_utils import format_kafka_brokers
@@ -1111,6 +1113,93 @@ def build_database_subscription_links(
     ]
 
 
+def _activity_display_time(log: ActivityLog) -> datetime:
+    payload = log.payload or {}
+    if log.source_type == "gitlab":
+        committed = payload.get("committed_at")
+        if isinstance(committed, str) and committed.strip():
+            text = committed.strip().replace(" UTC", "Z")
+            try:
+                return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                pass
+    return log.occurred_at
+
+
+def _load_subscription_activity_logs(
+    db: Session, connection_ids: list[int]
+) -> dict[int, list[ActivityLog]]:
+    if not connection_ids:
+        return {}
+    logs = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.connection_id.in_(connection_ids))
+        .order_by(ActivityLog.occurred_at.desc())
+        .all()
+    )
+    grouped: dict[int, list[ActivityLog]] = {connection_id: [] for connection_id in connection_ids}
+    for log in logs:
+        if log.connection_id in grouped:
+            grouped[log.connection_id].append(log)
+    return grouped
+
+
+def _last_updated_for_subscription_link(
+    connection_id: int,
+    link: dict[str, Any],
+    logs_by_connection: dict[int, list[ActivityLog]],
+) -> datetime | None:
+    from app.repo_service import repos_match
+
+    logs = logs_by_connection.get(connection_id, [])
+    if not logs:
+        return None
+
+    if link.get("link_kind") == "database":
+        latest: datetime | None = None
+        for log in logs:
+            if log.source_type != "database":
+                continue
+            ts = _activity_display_time(log)
+            if latest is None or ts > latest:
+                latest = ts
+        return latest
+
+    repo_path = str(link.get("repo_path") or "").strip()
+    branch = str(link.get("branch") or "").strip()
+    if not repo_path or not branch or branch == "-":
+        return None
+
+    latest = None
+    for log in logs:
+        if log.source_type != "gitlab":
+            continue
+        payload = log.payload or {}
+        repo = payload.get("repo")
+        log_branch = payload.get("branch")
+        if not repos_match(repo_path, str(repo) if repo is not None else None):
+            continue
+        if str(log_branch) != branch:
+            continue
+        ts = _activity_display_time(log)
+        if latest is None or ts > latest:
+            latest = ts
+    return latest
+
+
+def _attach_subscription_link_activity_times(
+    db: Session,
+    trees: list[dict[str, Any]],
+) -> None:
+    connection_ids = [int(tree["connection_id"]) for tree in trees if tree.get("connection_id")]
+    logs_by_connection = _load_subscription_activity_logs(db, connection_ids)
+    for tree in trees:
+        conn_id = int(tree["connection_id"])
+        for link in tree.get("links") or []:
+            last_updated = _last_updated_for_subscription_link(conn_id, link, logs_by_connection)
+            link["last_updated_at"] = last_updated.isoformat() if last_updated else None
+
+
 def list_gitlab_subscription_trees(
     db: Session,
     project: int | None = None,
@@ -1160,6 +1249,7 @@ def list_gitlab_subscription_trees(
                 "links": links,
             }
         )
+    _attach_subscription_link_activity_times(db, trees)
     return trees
 
 

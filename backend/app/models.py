@@ -50,6 +50,9 @@ class Connection(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    embed_sessions: Mapped[list["EmbedConsoleSession"]] = relationship(
+        back_populates="connection", cascade="all, delete-orphan"
+    )
     subscription: Mapped["Subscription | None"] = relationship(
         back_populates="connection", uselist=False, cascade="all, delete-orphan"
     )
@@ -119,6 +122,62 @@ class SchemaSnapshot(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class KafkaConsoleConnection(Base):
+    """连接方式 → Kafka 菜单专用，与 connections 表互不影响。"""
+
+    __tablename__ = "kafka_console_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    brokers: Mapped[str] = mapped_column(String(512), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class MqttConsoleConnection(Base):
+    """连接方式 → MQTT 菜单专用，与 connections 表互不影响。"""
+
+    __tablename__ = "mqtt_console_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    host: Mapped[str] = mapped_column(String(256), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=1883)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    mqtt_subscriptions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class EmbedConsoleSession(Base):
+    __tablename__ = "embed_console_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    connection_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    console_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    is_temporary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    external_alias: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    embed_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    snapshot_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    connection: Mapped["Connection"] = relationship(back_populates="embed_sessions")
 
 
 class RepoAccessSettings(Base):

@@ -21,10 +21,23 @@ from app.schemas import (
     DictItemUpdate,
     GitlabSubscriptionTreeOut,
     HomeResponse,
+    KafkaConsoleConnectionCreate,
+    KafkaConsoleConnectionOut,
+    KafkaConsoleConnectionTestRequest,
+    KafkaConsoleConnectionUpdate,
     MqttConsoleConfigOut,
+    MqttConsoleConnectOut,
+    MqttConsoleConnectionCreate,
+    MqttConsoleConnectionOut,
+    MqttConsoleConnectionTestRequest,
+    MqttConsoleConnectionUpdate,
+    MqttConsoleSubscriptionsUpdate,
+    OmnidbMenuUrlOut,
     OmnidbOpenOut,
     RedpandaOpenOut,
     RedisinsightOpenOut,
+    EmbedSessionOut,
+    MqttOpenOut,
     PublicConfigOut,
     SshwiftyOpenOut,
     RepoAccessSettingsOut,
@@ -40,8 +53,48 @@ from app.schemas import (
     SubscriptionUpdate,
 )
 from app.connection_test_service import test_connection
-from app.omnidb_service import build_omnidb_public_base, prepare_omnidb_open
-from app.redpanda_service import build_redpanda_public_base, prepare_redpanda_open
+from app.omnidb_service import (
+    build_omnidb_login_url,
+    build_omnidb_public_base,
+    prepare_omnidb_menu_url,
+    prepare_omnidb_open,
+)
+from app.embed_session_service import (
+    CONSOLE_DATABASE,
+    CONSOLE_KAFKA,
+    CONSOLE_MQTT,
+    CONSOLE_REDIS,
+    CONSOLE_TERMINAL,
+    close_embed_session,
+    create_embed_session,
+    get_active_embed_session,
+    update_embed_session,
+)
+from app.kafka_console_service import (
+    create_kafka_console_connection,
+    delete_kafka_console_connection,
+    get_kafka_console_connection,
+    list_kafka_console_connections,
+    test_kafka_console_connection,
+    update_kafka_console_connection,
+)
+from app.mqtt_console_service import (
+    create_mqtt_console_connection,
+    delete_mqtt_console_connection,
+    get_mqtt_console_connection,
+    list_mqtt_console_connections,
+    prepare_mqtt_console_connect,
+    test_mqtt_console_connection,
+    update_mqtt_console_connection,
+    update_mqtt_console_subscriptions,
+)
+from app.redpanda_service import (
+    build_redpanda_public_base,
+    disconnect_kafka_console_redpanda,
+    prepare_kafka_console_redpanda_open,
+    prepare_redpanda_open,
+    snapshot_redpanda_console_config,
+)
 from app.redisinsight_service import build_redisinsight_public_base, prepare_redisinsight_open
 from app.mqtt_service import prepare_mqtt_console_config
 from app.sshwifty_service import build_sshwifty_public_base, prepare_sshwifty_open
@@ -50,6 +103,7 @@ from app.services import (
     connection_environment_display,
     connection_is_database_type,
     connection_is_kafka_type,
+    connection_is_mqtt_type,
     connection_is_redis_type,
     connection_is_terminal_type,
     connection_project_display,
@@ -87,15 +141,25 @@ from app.ping_scheduler import ping_connection_record
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+@router.get("/public/omnidb-menu-url", response_model=OmnidbMenuUrlOut)
+def public_omnidb_menu_url(request: Request):
+    host_hint = request.headers.get("host")
+    public_base = build_omnidb_public_base(host_hint)
+    return OmnidbMenuUrlOut(url=prepare_omnidb_menu_url(public_base=public_base))
+
+
 @router.get("/public/config", response_model=PublicConfigOut)
 def public_config(request: Request):
     configured = get_public_webhook_base_url()
+    host_hint = request.headers.get("host")
+    omnidb_public_base = build_omnidb_public_base(host_hint)
     return PublicConfigOut(
         webhook_base_url=configured,
-        omnidb_base_url=build_omnidb_public_base(request.headers.get("host")),
-        sshwifty_base_url=build_sshwifty_public_base(request.headers.get("host")),
-        redpanda_base_url=build_redpanda_public_base(request.headers.get("host")),
-        redisinsight_base_url=build_redisinsight_public_base(request.headers.get("host")),
+        omnidb_base_url=omnidb_public_base,
+        omnidb_login_url=build_omnidb_login_url(public_base=omnidb_public_base),
+        sshwifty_base_url=build_sshwifty_public_base(host_hint),
+        redpanda_base_url=build_redpanda_public_base(host_hint),
+        redisinsight_base_url=build_redisinsight_public_base(host_hint),
     )
 
 
@@ -235,6 +299,25 @@ def post_test_connection(data: ConnectionTestRequest, db: Session = Depends(get_
     return test_connection(db, data)
 
 
+@router.get("/embed-sessions/{session_id}", response_model=EmbedSessionOut)
+def get_embed_session(session_id: str, db: Session = Depends(get_db)):
+    session = get_active_embed_session(db, session_id)
+    conn = session.connection
+    return EmbedSessionOut(
+        session_id=session.id,
+        console_type=session.console_type,
+        connection_id=session.connection_id,
+        connection_name=conn.name if conn else "",
+        embed_url=session.embed_url or "",
+        is_temporary=session.is_temporary,
+    )
+
+
+@router.delete("/embed-sessions/{session_id}", status_code=204)
+def delete_embed_session(session_id: str, db: Session = Depends(get_db)):
+    close_embed_session(db, session_id)
+
+
 @router.post("/connections/{connection_id}/omnidb-open", response_model=OmnidbOpenOut)
 def post_omnidb_open(
     connection_id: int,
@@ -251,7 +334,20 @@ def post_omnidb_open(
     public_base = build_omnidb_public_base(host_hint)
     if not settings.omnidb_internal_url:
         raise HTTPException(status_code=503, detail="OmniDB 未配置")
-    payload = prepare_omnidb_open(conn, public_base=public_base)
+    session = create_embed_session(db, conn, CONSOLE_DATABASE, temporary=True)
+    payload = prepare_omnidb_open(
+        conn,
+        public_base=public_base,
+        external_alias=session.external_alias,
+        ensure_tab=True,
+    )
+    update_embed_session(
+        db,
+        session,
+        external_id=str(payload.get("omnidb_connection_id") or ""),
+        embed_url=payload["embed_url"],
+    )
+    payload["session_id"] = session.id
     return OmnidbOpenOut(**payload)
 
 
@@ -269,8 +365,137 @@ def post_sshwifty_open(
         raise HTTPException(status_code=400, detail="仅终端模拟器类型连接支持 Sshwifty")
     host_hint = public_host or request.headers.get("host")
     public_base = build_sshwifty_public_base(host_hint)
+    session = create_embed_session(db, conn, CONSOLE_TERMINAL, temporary=True)
     payload = prepare_sshwifty_open(conn, public_base=public_base)
+    update_embed_session(db, session, embed_url=payload["embed_url"])
+    payload["session_id"] = session.id
     return SshwiftyOpenOut(**payload)
+
+
+@router.post("/connections/{connection_id}/redpanda-connect", response_model=RedpandaOpenOut)
+def post_redpanda_connect(
+    connection_id: int,
+    request: Request,
+    public_host: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """菜单入口：持久化同步集群配置，不创建临时会话。"""
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not connection_is_kafka_type(db, conn):
+        raise HTTPException(status_code=400, detail="仅 Kafka 类型连接支持 Redpanda Console")
+    host_hint = public_host or request.headers.get("host")
+    public_base = build_redpanda_public_base(host_hint)
+    if not settings.redpanda_config_path:
+        raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
+    payload = prepare_redpanda_open(db, conn, public_base=public_base)
+    return RedpandaOpenOut(**payload)
+
+
+@router.get("/kafka-console/connections", response_model=list[KafkaConsoleConnectionOut])
+def get_kafka_console_connections(db: Session = Depends(get_db)):
+    return list_kafka_console_connections(db)
+
+
+@router.post("/kafka-console/connections", response_model=KafkaConsoleConnectionOut, status_code=201)
+def post_kafka_console_connection(data: KafkaConsoleConnectionCreate, db: Session = Depends(get_db)):
+    return create_kafka_console_connection(db, data)
+
+
+@router.put("/kafka-console/connections/{connection_id}", response_model=KafkaConsoleConnectionOut)
+def put_kafka_console_connection(
+    connection_id: int,
+    data: KafkaConsoleConnectionUpdate,
+    db: Session = Depends(get_db),
+):
+    conn = get_kafka_console_connection(db, connection_id)
+    return update_kafka_console_connection(db, conn, data)
+
+
+@router.delete("/kafka-console/connections/{connection_id}", status_code=204)
+def delete_kafka_console_connection_route(connection_id: int, db: Session = Depends(get_db)):
+    conn = get_kafka_console_connection(db, connection_id)
+    delete_kafka_console_connection(db, conn)
+
+
+@router.post("/kafka-console/connections/test", response_model=ConnectionTestOut)
+def post_kafka_console_connection_test(data: KafkaConsoleConnectionTestRequest):
+    return test_kafka_console_connection(data)
+
+
+@router.post("/kafka-console/connections/{connection_id}/connect", response_model=RedpandaOpenOut)
+def post_kafka_console_connect(
+    connection_id: int,
+    request: Request,
+    public_host: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """连接方式 → Kafka：同步集群配置并返回 Redpanda Console 地址。"""
+    conn = get_kafka_console_connection(db, connection_id)
+    host_hint = public_host or request.headers.get("host")
+    public_base = build_redpanda_public_base(host_hint)
+    if not settings.redpanda_config_path:
+        raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
+    payload = prepare_kafka_console_redpanda_open(db, conn, public_base=public_base)
+    return RedpandaOpenOut(**payload)
+
+
+@router.post("/kafka-console/disconnect", status_code=204)
+def post_kafka_console_disconnect():
+    """连接方式 → Kafka：取消连接并恢复 Redpanda Console 配置。"""
+    disconnect_kafka_console_redpanda()
+
+
+@router.get("/mqtt-console/connections", response_model=list[MqttConsoleConnectionOut])
+def get_mqtt_console_connections(db: Session = Depends(get_db)):
+    return list_mqtt_console_connections(db)
+
+
+@router.post("/mqtt-console/connections", response_model=MqttConsoleConnectionOut, status_code=201)
+def post_mqtt_console_connection(data: MqttConsoleConnectionCreate, db: Session = Depends(get_db)):
+    return create_mqtt_console_connection(db, data)
+
+
+@router.put("/mqtt-console/connections/{connection_id}", response_model=MqttConsoleConnectionOut)
+def put_mqtt_console_connection(
+    connection_id: int,
+    data: MqttConsoleConnectionUpdate,
+    db: Session = Depends(get_db),
+):
+    conn = get_mqtt_console_connection(db, connection_id)
+    return update_mqtt_console_connection(db, conn, data)
+
+
+@router.delete("/mqtt-console/connections/{connection_id}", status_code=204)
+def delete_mqtt_console_connection_route(connection_id: int, db: Session = Depends(get_db)):
+    conn = get_mqtt_console_connection(db, connection_id)
+    delete_mqtt_console_connection(db, conn)
+
+
+@router.post("/mqtt-console/connections/test", response_model=ConnectionTestOut)
+def post_mqtt_console_connection_test(data: MqttConsoleConnectionTestRequest):
+    return test_mqtt_console_connection(data)
+
+
+@router.put(
+    "/mqtt-console/connections/{connection_id}/subscriptions",
+    response_model=MqttConsoleConnectionOut,
+)
+def put_mqtt_console_subscriptions(
+    connection_id: int,
+    data: MqttConsoleSubscriptionsUpdate,
+    db: Session = Depends(get_db),
+):
+    conn = get_mqtt_console_connection(db, connection_id)
+    return update_mqtt_console_subscriptions(db, conn, data)
+
+
+@router.post("/mqtt-console/connections/{connection_id}/connect", response_model=MqttConsoleConnectOut)
+def post_mqtt_console_connect(connection_id: int, db: Session = Depends(get_db)):
+    """连接方式 → MQTT：返回控制台连接参数（含密码，仅用于建立连接）。"""
+    conn = get_mqtt_console_connection(db, connection_id)
+    return prepare_mqtt_console_connect(conn)
 
 
 @router.post("/connections/{connection_id}/redpanda-open", response_model=RedpandaOpenOut)
@@ -289,7 +514,21 @@ def post_redpanda_open(
     public_base = build_redpanda_public_base(host_hint)
     if not settings.redpanda_config_path:
         raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
-    payload = prepare_redpanda_open(db, conn, public_base=public_base)
+    session = create_embed_session(db, conn, CONSOLE_KAFKA, temporary=True)
+    snapshot_before = snapshot_redpanda_console_config()
+    payload = prepare_redpanda_open(
+        db,
+        conn,
+        public_base=public_base,
+        snapshot_before=snapshot_before,
+    )
+    update_embed_session(
+        db,
+        session,
+        embed_url=payload["embed_url"],
+        snapshot_config=snapshot_before,
+    )
+    payload["session_id"] = session.id
     return RedpandaOpenOut(**payload)
 
 
@@ -309,8 +548,33 @@ def post_redisinsight_open(
     public_base = build_redisinsight_public_base(host_hint)
     if not settings.redisinsight_internal_url:
         raise HTTPException(status_code=503, detail="RedisInsight 未配置")
-    payload = prepare_redisinsight_open(conn, public_base=public_base)
+    session = create_embed_session(db, conn, CONSOLE_REDIS, temporary=True)
+    payload = prepare_redisinsight_open(
+        conn,
+        public_base=public_base,
+        external_name=session.external_alias,
+    )
+    update_embed_session(
+        db,
+        session,
+        external_id=str(payload.get("database_id") or ""),
+        embed_url=payload["embed_url"],
+    )
+    payload["session_id"] = session.id
     return RedisinsightOpenOut(**payload)
+
+
+@router.post("/connections/{connection_id}/mqtt-open", response_model=MqttOpenOut)
+def post_mqtt_open(connection_id: int, db: Session = Depends(get_db)):
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not connection_is_mqtt_type(db, conn):
+        raise HTTPException(status_code=400, detail="仅 MQTT 类型连接支持控制台")
+    session = create_embed_session(db, conn, CONSOLE_MQTT, temporary=True)
+    config = prepare_mqtt_console_config(db, conn)
+    update_embed_session(db, session, embed_url=f"/mqtt?connectionId={conn.id}&sessionId={session.id}")
+    return MqttOpenOut(**config, session_id=session.id)
 
 
 @router.get("/connections/{connection_id}/mqtt-config", response_model=MqttConsoleConfigOut)

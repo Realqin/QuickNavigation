@@ -106,6 +106,7 @@ export interface GitlabSubscriptionLink {
   enabled: boolean;
   link_kind?: 'gitlab' | 'database';
   webhook_secret?: string | null;
+  last_updated_at?: string | null;
 }
 
 export interface GitlabSubscriptionTree {
@@ -177,6 +178,7 @@ export interface MqttConsoleConfig {
   connection_name: string;
   host: string;
   port: number;
+  broker_url?: string;
   ws_path: string;
   username: string;
   password: string;
@@ -210,31 +212,112 @@ export interface DictFormValues {
 export interface PublicConfig {
   webhook_base_url: string;
   omnidb_base_url?: string;
+  omnidb_login_url?: string;
   sshwifty_base_url?: string;
   redpanda_base_url?: string;
   redisinsight_base_url?: string;
+}
+
+export interface EmbedSession {
+  session_id: string;
+  console_type: string;
+  connection_id: number;
+  connection_name: string;
+  embed_url: string;
+  is_temporary: boolean;
 }
 
 export interface OmnidbOpenResult {
   embed_url: string;
   connection_name: string;
   omnidb_connection_id?: number | null;
+  session_id?: string | null;
 }
 
 export interface SshwiftyOpenResult {
   embed_url: string;
   connection_name: string;
+  session_id?: string | null;
 }
 
 export interface RedpandaOpenResult {
   embed_url: string;
   connection_name: string;
+  session_id?: string | null;
+}
+
+export interface KafkaConsoleConnection {
+  id: number;
+  name: string;
+  brokers: string;
+  username?: string | null;
+  password_set: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KafkaConsoleConnectionFormValues {
+  name: string;
+  brokers: string;
+  username?: string;
+  password?: string;
+}
+
+export interface KafkaConsoleConnectionTestPayload {
+  brokers: string;
+  username?: string;
+  password?: string;
+}
+
+export interface MqttConsoleConnection {
+  id: number;
+  name: string;
+  host: string;
+  port: number;
+  username?: string | null;
+  password_set: boolean;
+  mqtt_subscriptions: MqttSubscription[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MqttConsoleConnectionFormValues {
+  name: string;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+export interface MqttConsoleConnectionTestPayload {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+export interface MqttConsoleConnectResult {
+  connection_id: number;
+  connection_name: string;
+  host: string;
+  port: number;
+  broker_url: string;
+  username: string;
+  password: string;
+  subscriptions: MqttSubscription[];
 }
 
 export interface RedisinsightOpenResult {
   embed_url: string;
   connection_name: string;
   database_id?: string | null;
+  session_id?: string | null;
+}
+
+export interface MqttOpenResult extends MqttConsoleConfig {
+  session_id?: string | null;
 }
 
 export interface SchemaMonitorStatus {

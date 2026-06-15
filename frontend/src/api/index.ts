@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { buildAppWebSocketUrl } from '../utils/appWebSocket';
+import { resolveApiBaseUrl } from '../utils/apiBase';
+import { buildLogsWebSocketUrl } from '../utils/appWebSocket';
 import type {
   ActivityLog,
   ActivityLogDiff,
@@ -11,8 +12,18 @@ import type {
   DictItem,
   DictType,
   HomeData,
+  KafkaConsoleConnection,
+  KafkaConsoleConnectionFormValues,
+  KafkaConsoleConnectionTestPayload,
+  MqttConsoleConnectResult,
+  MqttConsoleConnection,
+  MqttConsoleConnectionFormValues,
+  MqttConsoleConnectionTestPayload,
+  MqttSubscription,
   OmnidbOpenResult,
+  EmbedSession,
   MqttConsoleConfig,
+  MqttOpenResult,
   RedpandaOpenResult,
   RedisinsightOpenResult,
   SshwiftyOpenResult,
@@ -25,7 +36,7 @@ import type {
 } from '../types';
 
 const client = axios.create({
-  baseURL: '/',
+  baseURL: resolveApiBaseUrl(),
   timeout: 15000,
 });
 
@@ -46,6 +57,11 @@ export async function fetchConnections(params?: {
   group_id?: number;
 }): Promise<Connection[]> {
   const { data } = await client.get<Connection[]>('/api/connections', { params });
+  return data;
+}
+
+export async function fetchConnection(id: number): Promise<Connection> {
+  const { data } = await client.get<Connection>(`/api/connections/${id}`);
   return data;
 }
 
@@ -91,6 +107,23 @@ export async function fetchMqttConsoleConfig(connectionId: number): Promise<Mqtt
   return data;
 }
 
+export async function openMqttConsoleSession(connectionId: number): Promise<MqttOpenResult> {
+  const { data } = await client.post<MqttOpenResult>(
+    `/api/connections/${connectionId}/mqtt-open`,
+    null,
+  );
+  return data;
+}
+
+export async function fetchEmbedSession(sessionId: string): Promise<EmbedSession> {
+  const { data } = await client.get<EmbedSession>(`/api/embed-sessions/${sessionId}`);
+  return data;
+}
+
+export async function closeEmbedSession(sessionId: string): Promise<void> {
+  await client.delete(`/api/embed-sessions/${sessionId}`);
+}
+
 export async function openRedpandaConsole(
   connectionId: number,
   publicHost?: string,
@@ -102,6 +135,143 @@ export async function openRedpandaConsole(
       params: publicHost ? { public_host: publicHost } : undefined,
       timeout: 30000,
     },
+  );
+  return data;
+}
+
+/** 连接方式菜单：持久化同步后返回控制台地址 */
+export async function connectRedpandaConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<RedpandaOpenResult> {
+  const { data } = await client.post<RedpandaOpenResult>(
+    `/api/connections/${connectionId}/redpanda-connect`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+      timeout: 30000,
+    },
+  );
+  return data;
+}
+
+export async function fetchKafkaConsoleConnections(): Promise<KafkaConsoleConnection[]> {
+  const { data } = await client.get<KafkaConsoleConnection[]>('/api/kafka-console/connections');
+  return data;
+}
+
+export async function createKafkaConsoleConnection(
+  values: KafkaConsoleConnectionFormValues,
+): Promise<KafkaConsoleConnection> {
+  const { data } = await client.post<KafkaConsoleConnection>('/api/kafka-console/connections', values);
+  return data;
+}
+
+export async function updateKafkaConsoleConnection(
+  id: number,
+  values: Partial<KafkaConsoleConnectionFormValues>,
+): Promise<KafkaConsoleConnection> {
+  const { data } = await client.put<KafkaConsoleConnection>(
+    `/api/kafka-console/connections/${id}`,
+    values,
+  );
+  return data;
+}
+
+export async function deleteKafkaConsoleConnection(id: number): Promise<void> {
+  await client.delete(`/api/kafka-console/connections/${id}`);
+}
+
+export async function testKafkaConsoleConnection(
+  payload: KafkaConsoleConnectionTestPayload,
+): Promise<ConnectionTestResult> {
+  const { data } = await client.post<ConnectionTestResult>(
+    '/api/kafka-console/connections/test',
+    payload,
+  );
+  return data;
+}
+
+export async function connectKafkaConsole(
+  connectionId: number,
+  publicHost?: string,
+): Promise<RedpandaOpenResult> {
+  const { data } = await client.post<RedpandaOpenResult>(
+    `/api/kafka-console/connections/${connectionId}/connect`,
+    null,
+    {
+      params: publicHost ? { public_host: publicHost } : undefined,
+      timeout: 30000,
+    },
+  );
+  return data;
+}
+
+export async function disconnectKafkaConsole(): Promise<void> {
+  await client.post('/api/kafka-console/disconnect', null, { timeout: 30000 });
+}
+
+export function beaconDisconnectKafkaConsole(): void {
+  if (typeof navigator.sendBeacon === 'function') {
+    navigator.sendBeacon('/api/kafka-console/disconnect');
+    return;
+  }
+  disconnectKafkaConsole().catch(() => undefined);
+}
+
+export async function fetchMqttConsoleConnections(): Promise<MqttConsoleConnection[]> {
+  const { data } = await client.get<MqttConsoleConnection[]>('/api/mqtt-console/connections');
+  return data;
+}
+
+export async function createMqttConsoleConnection(
+  values: MqttConsoleConnectionFormValues,
+): Promise<MqttConsoleConnection> {
+  const { data } = await client.post<MqttConsoleConnection>('/api/mqtt-console/connections', values);
+  return data;
+}
+
+export async function updateMqttConsoleConnection(
+  id: number,
+  values: Partial<MqttConsoleConnectionFormValues>,
+): Promise<MqttConsoleConnection> {
+  const { data } = await client.put<MqttConsoleConnection>(
+    `/api/mqtt-console/connections/${id}`,
+    values,
+  );
+  return data;
+}
+
+export async function deleteMqttConsoleConnection(id: number): Promise<void> {
+  await client.delete(`/api/mqtt-console/connections/${id}`);
+}
+
+export async function testMqttConsoleConnection(
+  payload: MqttConsoleConnectionTestPayload,
+): Promise<ConnectionTestResult> {
+  const { data } = await client.post<ConnectionTestResult>(
+    '/api/mqtt-console/connections/test',
+    payload,
+  );
+  return data;
+}
+
+export async function connectMqttConsole(connectionId: number): Promise<MqttConsoleConnectResult> {
+  const { data } = await client.post<MqttConsoleConnectResult>(
+    `/api/mqtt-console/connections/${connectionId}/connect`,
+    null,
+    { timeout: 30000 },
+  );
+  return data;
+}
+
+export async function updateMqttConsoleSubscriptions(
+  connectionId: number,
+  subscriptions: MqttSubscription[],
+): Promise<MqttConsoleConnection> {
+  const { data } = await client.put<MqttConsoleConnection>(
+    `/api/mqtt-console/connections/${connectionId}/subscriptions`,
+    { subscriptions },
   );
   return data;
 }
@@ -202,7 +372,7 @@ export async function updateSubscription(
 }
 
 export function createLogsWebSocket(onMessage: (log: ActivityLog) => void): WebSocket {
-  const ws = new WebSocket(buildAppWebSocketUrl('/ws/logs'));
+  const ws = new WebSocket(buildLogsWebSocketUrl());
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
@@ -240,6 +410,11 @@ export async function deleteDictItem(id: number): Promise<void> {
 
 export async function fetchPublicConfig(): Promise<PublicConfig> {
   const { data } = await client.get<PublicConfig>('/api/public/config');
+  return data;
+}
+
+export async function fetchOmnidbMenuUrl(): Promise<{ url: string }> {
+  const { data } = await client.get<{ url: string }>('/api/public/omnidb-menu-url');
   return data;
 }
 

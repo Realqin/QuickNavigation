@@ -18,18 +18,28 @@ services:
       timeout: 5s
       retries: 20
 
-  omnidb:
+  omnidb-app:
     build: ./docker/omnidb
-    container_name: quicknav-omnidb
+    container_name: quicknav-omnidb-app
     restart: unless-stopped
     environment:
       OMNIDB_ADMIN_USER: admin
       OMNIDB_ADMIN_PASSWORD: admin@123
+    expose:
+      - "8000"
     ports:
-      - "8081:8000"
       - "25482:25482"
     volumes:
       - omnidb_data:/home/omnidb/.omnidb/omnidb-server
+
+  omnidb:
+    build: ./docker/omnidb-proxy
+    container_name: quicknav-omnidb
+    restart: unless-stopped
+    depends_on:
+      - omnidb-app
+    ports:
+      - "8081:8081"
 
   sshwifty-app:
     image: niruix/sshwifty:latest
@@ -65,18 +75,27 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  redisinsight:
+  redisinsight-app:
     image: redis/redisinsight:latest
-    container_name: quicknav-redisinsight
+    container_name: quicknav-redisinsight-app
     restart: unless-stopped
     environment:
       RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
-    ports:
-      - "5540:5540"
+    expose:
+      - "5540"
     volumes:
       - redisinsight_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  redisinsight:
+    build: ./docker/redisinsight-proxy
+    container_name: quicknav-redisinsight
+    restart: unless-stopped
+    depends_on:
+      - redisinsight-app
+    ports:
+      - "5540:5540"
 
   backend:
     build: ./backend
@@ -92,7 +111,7 @@ services:
       GITLAB_BASE_URL: http://gitlab.bj.uniseas.com.cn
       PUBLIC_WEBHOOK_BASE_URL: http://192.168.6.127:8080
       SCHEMA_MONITOR_INTERVAL_SECONDS: 300
-      OMNIDB_INTERNAL_URL: http://omnidb:8000
+      OMNIDB_INTERNAL_URL: http://omnidb-app:8000
       OMNIDB_PUBLIC_PORT: 8081
       OMNIDB_ADMIN_USER: admin
       OMNIDB_ADMIN_PASSWORD: admin@123
@@ -105,7 +124,7 @@ services:
       REDPANDA_CONFIG_PATH: /config/console-config.yml
       REDPANDA_CLUSTERS_MANIFEST_PATH: /config/clusters-manifest.yml
       REDPANDA_RELOAD_WAIT_SECONDS: 3
-      REDISINSIGHT_INTERNAL_URL: http://redisinsight:5540
+      REDISINSIGHT_INTERNAL_URL: http://redisinsight-app:5540
       REDISINSIGHT_PUBLIC_PORT: 5540
       REDISINSIGHT_REDIS_HOST: host.docker.internal
     volumes:
@@ -114,11 +133,15 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      omnidb-app:
+        condition: service_started
       omnidb:
         condition: service_started
       sshwifty:
         condition: service_started
       redpanda-console:
+        condition: service_started
+      redisinsight-app:
         condition: service_started
       redisinsight:
         condition: service_started

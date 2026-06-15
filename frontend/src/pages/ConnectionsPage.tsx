@@ -11,6 +11,7 @@ import {
   Button,
   Form,
   Input,
+  Pagination,
   Popconfirm,
   Select,
   Space,
@@ -49,11 +50,18 @@ interface ConnectionRow {
   kind: RowKind;
   connection: Connection;
   subIndex?: number;
-  subLink?: SubLink;
 }
 
 const PING_REFRESH_MS = 3 * 60 * 1000;
+const TABLE_SCROLL_Y = 'calc(100vh - 320px)';
 const CHILD_NAME_INDENT = 32;
+
+function getChildSubLink(row: ConnectionRow): SubLink | undefined {
+  if (row.kind !== 'child' || row.subIndex === undefined) {
+    return undefined;
+  }
+  return row.connection.sub_links?.[row.subIndex];
+}
 
 function renderTags(ids: number[] | undefined, idMap: Record<number, string>, color?: string) {
   if (!ids?.length) return '-';
@@ -88,13 +96,12 @@ function buildRows(connections: Connection[], expandedIds: Set<number>): Connect
     });
     const subLinks = connection.sub_links ?? [];
     if (subLinks.length > 0 && expandedIds.has(connection.id)) {
-      subLinks.forEach((subLink, subIndex) => {
+      subLinks.forEach((_subLink, subIndex) => {
         rows.push({
           rowKey: `c-${connection.id}-${subIndex}`,
           kind: 'child',
           connection,
           subIndex,
-          subLink,
         });
       });
     }
@@ -120,9 +127,19 @@ export default function ConnectionsPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [pingingKeys, setPingingKeys] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const nameDebounceRef = useRef<number | null>(null);
 
-  const tableRows = useMemo(() => buildRows(data, expandedIds), [data, expandedIds]);
+  const paginatedParents = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return data.slice(start, start + pageSize);
+  }, [data, page, pageSize]);
+
+  const tableRows = useMemo(
+    () => buildRows(paginatedParents, expandedIds),
+    [paginatedParents, expandedIds],
+  );
 
   const loadData = useCallback(async (filters?: FilterValues, silent = false) => {
     const values = filters ?? form.getFieldsValue();
@@ -137,6 +154,7 @@ export default function ConnectionsPage() {
         group_id: values.group_id,
       });
       setData(list);
+      setPage(1);
       setSelectedRowKeys((prev) => prev.filter((id) => list.some((item) => item.id === id)));
       setExpandedIds((prev) => {
         const next = new Set<number>();
@@ -176,6 +194,13 @@ export default function ConnectionsPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(data.length / pageSize));
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [data.length, page, pageSize]);
 
   const toggleExpand = (connectionId: number) => {
     setExpandedIds((prev) => {
@@ -265,7 +290,7 @@ export default function ConnectionsPage() {
   };
 
   return (
-    <div className="tab-page">
+    <div className="tab-page connections-page">
       <div className="tab-page-toolbar">
         <Typography.Title level={5} style={{ margin: 0 }}>
           连接管理
@@ -297,7 +322,7 @@ export default function ConnectionsPage() {
       <Form
         form={form}
         layout="inline"
-        style={{ marginBottom: 16 }}
+        className="connections-page__filters"
         onValuesChange={handleValuesChange}
       >
         <Form.Item name="name" label="名称">
@@ -330,10 +355,13 @@ export default function ConnectionsPage() {
       </Form>
 
       <Table
+        className="connections-page__table"
         rowKey="rowKey"
         loading={loading}
         dataSource={tableRows}
-        pagination={{ pageSize: 10 }}
+        pagination={false}
+        scroll={{ x: 1400, y: TABLE_SCROLL_Y }}
+        rowClassName={(row) => (row.kind === 'child' ? 'connections-row--child' : '')}
         rowSelection={{
           selectedRowKeys: selectedRowKeys.map((id) => `p-${id}`),
           onChange: (keys) => {
@@ -351,15 +379,17 @@ export default function ConnectionsPage() {
           {
             title: '名称',
             dataIndex: 'name',
+            width: 260,
             render: (_, row) => {
-              const { connection, kind, subLink } = row;
+              const { connection, kind } = row;
               const subCount = connection.sub_links?.length ?? 0;
               const expanded = expandedIds.has(connection.id);
+              const subLink = getChildSubLink(row);
 
-              if (kind === 'child' && subLink) {
+              if (kind === 'child') {
                 return (
                   <span style={{ paddingLeft: CHILD_NAME_INDENT, display: 'inline-block' }}>
-                    {subLink.name}
+                    {subLink?.name ?? '-'}
                   </span>
                 );
               }
@@ -378,7 +408,7 @@ export default function ConnectionsPage() {
                     <span style={{ display: 'inline-block', width: 24 }} />
                   )}
                   <span>{connection.name}</span>
-                  {subCount > 0 && <Tag color="blue">{subCount} 个子链接</Tag>}
+                  {subCount > 0 ? <Tag color="blue">{subCount} 个子链接</Tag> : null}
                 </Space>
               );
             },
@@ -390,7 +420,7 @@ export default function ConnectionsPage() {
             render: (_, row) => {
               const url =
                 row.kind === 'child'
-                  ? row.subLink?.url
+                  ? getChildSubLink(row)?.url
                   : formatConnectionEndpoint(row.connection);
               if (!url) return '-';
               return (
@@ -407,11 +437,11 @@ export default function ConnectionsPage() {
             render: (_, row) => {
               const reachable =
                 row.kind === 'child'
-                  ? row.subLink?.is_reachable
+                  ? getChildSubLink(row)?.is_reachable
                   : row.connection.is_reachable;
               const checkedAt =
                 row.kind === 'child'
-                  ? row.subLink?.last_checked_at
+                  ? getChildSubLink(row)?.last_checked_at
                   : row.connection.last_checked_at;
               return (
                 <Tooltip
@@ -429,29 +459,41 @@ export default function ConnectionsPage() {
           {
             title: '项目',
             dataIndex: 'projects',
-            render: (_, row) => renderTags(row.connection.projects, projects.idMap),
+            width: 140,
+            render: (_, row) =>
+              row.kind === 'child' ? null : renderTags(row.connection.projects, projects.idMap),
           },
           {
             title: '环境',
             dataIndex: 'environments',
-            render: (_, row) => renderTags(row.connection.environments, environments.idMap, 'orange'),
+            width: 140,
+            render: (_, row) =>
+              row.kind === 'child'
+                ? null
+                : renderTags(row.connection.environments, environments.idMap, 'orange'),
           },
           {
             title: '类型',
             dataIndex: 'type',
-            render: (_, row) => (
-              <Tag>{labels.idMap[row.connection.type] ?? row.connection.type}</Tag>
-            ),
+            width: 100,
+            render: (_, row) =>
+              row.kind === 'child' ? null : (
+                <Tag>{labels.idMap[row.connection.type] ?? row.connection.type}</Tag>
+              ),
           },
           {
             title: '分组',
             dataIndex: 'group_id',
+            width: 100,
             render: (_, row) =>
-              connectionGroups.idMap[row.connection.group_id ?? 0] ?? '-',
+              row.kind === 'child'
+                ? null
+                : connectionGroups.idMap[row.connection.group_id ?? 0] ?? '-',
           },
           {
             title: '操作',
             width: 220,
+            fixed: 'right',
             render: (_, row) => {
               const pingKey =
                 row.subIndex === undefined
@@ -498,6 +540,23 @@ export default function ConnectionsPage() {
           },
         ]}
       />
+
+      <div className="connections-page__pagination">
+        <Pagination
+          current={page}
+          pageSize={pageSize}
+          total={data.length}
+          showSizeChanger
+          pageSizeOptions={[10, 20, 50]}
+          showTotal={(total) => `共 ${total} 条连接`}
+          onChange={(nextPage, nextPageSize) => {
+            setPage(nextPage);
+            if (nextPageSize) {
+              setPageSize(nextPageSize);
+            }
+          }}
+        />
+      </div>
 
       <ConnectionFormModal
         open={modalOpen}

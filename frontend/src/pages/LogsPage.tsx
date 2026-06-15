@@ -1,12 +1,15 @@
 import {
   DatabaseOutlined,
+  EditOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
+import type { AxiosError } from 'axios';
 import {
   Button,
   Form,
+  Modal,
   Select,
   Space,
   Switch,
@@ -18,18 +21,21 @@ import {
 } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  fetchConnection,
   fetchLogs,
   fetchPublicConfig,
   fetchSubscriptions,
+  scanSchemaMonitor,
+  updateConnection,
   updateSubscription,
 } from '../api';
 import CommitAiAnalysisModal from '../components/CommitAiAnalysisModal';
-import CommitDiffModal from '../components/CommitDiffModal';
+import ConnectionFormModal from '../components/ConnectionFormModal';
 import RepoAccessSettingsModal from '../components/RepoAccessSettingsModal';
-import SchemaChangeModal from '../components/SchemaChangeModal';
-import SchemaMonitorModal from '../components/SchemaMonitorModal';
 import { useDictGroup } from '../hooks/useDict';
-import type { ActivityLog, GitlabSubscriptionTree } from '../types';
+import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
+import type { ActivityLog, Connection, ConnectionFormValues, GitlabSubscriptionTree } from '../types';
+import { extractCommitSha } from '../utils/activityLogDetail';
 import { formatBeijingTime } from '../utils/dateTime';
 import { getSchemaChanges, isSchemaChangeLog } from '../utils/schemaChangeLog';
 
@@ -43,21 +49,18 @@ const LOGS_PAGE_HINT = '只获取类型为 GitLab 和数据库类型的数据';
 interface SubscriptionTableRow {
   key: string;
   subscription_id: number;
+  connection_id: number;
   name: string;
   project_display?: string;
   environment_display?: string;
   connection_type_name?: string | null;
   url?: string;
   branch?: string;
+  updated_at?: string | null;
   enabled?: boolean;
   link_key?: string;
   isConnection: boolean;
   children?: SubscriptionTableRow[];
-}
-
-function extractCommitSha(log: ActivityLog): string | null {
-  const sha = log.payload?.commit_sha;
-  return typeof sha === 'string' && sha ? sha : null;
 }
 
 function extractCommitTime(log: ActivityLog): string | null {
@@ -88,14 +91,36 @@ function renderActor(log: ActivityLog): string | null {
   return null;
 }
 
+function pickLatestTime(...times: Array<string | null | undefined>): string | null {
+  let latest: string | null = null;
+  for (const time of times) {
+    if (!time) continue;
+    if (!latest || new Date(time).getTime() > new Date(latest).getTime()) {
+      latest = time;
+    }
+  }
+  return latest;
+}
+
+function resolveConnectionUpdatedAt(
+  mainUpdatedAt: string | null | undefined,
+  children: SubscriptionTableRow[] | undefined,
+): string | null {
+  if (mainUpdatedAt) {
+    return mainUpdatedAt;
+  }
+  return pickLatestTime(...(children?.map((child) => child.updated_at) ?? []));
+}
+
 function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] {
   return trees.map((tree) => {
     const mainLink = tree.links.find((link) => link.link_key === 'main');
     const subLinks = tree.links.filter((link) => link.link_key !== 'main');
 
-    return {
+    const row: SubscriptionTableRow = {
       key: `conn-${tree.connection_id}`,
       subscription_id: tree.id,
+      connection_id: tree.connection_id,
       name: tree.connection_name,
       project_display: tree.project_display,
       environment_display: tree.environment_display,
@@ -105,42 +130,65 @@ function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] 
       enabled: mainLink?.enabled,
       link_key: mainLink ? 'main' : undefined,
       isConnection: true,
-      children: subLinks.map((link) => ({
+    };
+
+    if (subLinks.length > 0) {
+      row.children = subLinks.map((link) => ({
         key: `${tree.id}-${link.link_key}`,
         subscription_id: tree.id,
+        connection_id: tree.connection_id,
         link_key: link.link_key,
         name: link.name,
         url: link.url,
         branch: link.branch,
+        updated_at: link.last_updated_at ?? null,
         enabled: link.enabled,
         isConnection: false,
-      })),
-    };
+      }));
+    }
+
+    row.updated_at = resolveConnectionUpdatedAt(
+      mainLink?.last_updated_at ?? null,
+      row.children,
+    );
+
+    return row;
   });
 }
 
+function extractScanError(error: unknown, fallback: string): string {
+  const axiosError = error as AxiosError<{ detail?: string }>;
+  const detail = axiosError.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail;
+  }
+  if (axiosError.code === 'ECONNABORTED') {
+    return '巡检超时，库表较多时请稍候再试或缩小监控范围';
+  }
+  return fallback;
+}
+
+function isDatabaseConnection(typeName?: string | null): boolean {
+  return Boolean(typeName?.includes('数据库'));
+}
+
 export default function LogsPage() {
-  const { projects, environments } = useDictGroup();
+  const { projects, environments, labels, connectionGroups } = useDictGroup();
+  const { openActivityLogDetail, detailModals } = useActivityLogDetail();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [subs, setSubs] = useState<GitlabSubscriptionTree[]>([]);
   const [loading, setLoading] = useState(false);
   const [logForm] = Form.useForm();
   const [subForm] = Form.useForm();
-  const [diffLogId, setDiffLogId] = useState<number | null>(null);
-  const [diffCommitSha, setDiffCommitSha] = useState<string | null>(null);
-  const [diffSummary, setDiffSummary] = useState<string | null>(null);
-  const [diffOpen, setDiffOpen] = useState(false);
   const [aiLogId, setAiLogId] = useState<number | null>(null);
   const [aiCommitSha, setAiCommitSha] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [webhookBase, setWebhookBase] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [schemaMonitorOpen, setSchemaMonitorOpen] = useState(false);
-  const [schemaMonitorSubId, setSchemaMonitorSubId] = useState<number | null>(null);
-  const [schemaMonitorName, setSchemaMonitorName] = useState('');
-  const [schemaChangeLog, setSchemaChangeLog] = useState<ActivityLog | null>(null);
-  const [schemaChangeOpen, setSchemaChangeOpen] = useState(false);
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [scanningSubIds, setScanningSubIds] = useState<number[]>([]);
 
   const tableData = useMemo(() => buildTreeRows(subs), [subs]);
 
@@ -203,18 +251,11 @@ export default function LogsPage() {
   };
 
   const openSchemaChange = (log: ActivityLog) => {
-    if (!isSchemaChangeLog(log)) return;
-    setSchemaChangeLog(log);
-    setSchemaChangeOpen(true);
+    openActivityLogDetail(log);
   };
 
   const openDiff = (log: ActivityLog) => {
-    const sha = extractCommitSha(log);
-    if (!sha) return;
-    setDiffLogId(log.id);
-    setDiffCommitSha(sha);
-    setDiffSummary(log.summary ?? null);
-    setDiffOpen(true);
+    openActivityLogDetail(log);
   };
 
   const openAiAnalysis = (log: ActivityLog) => {
@@ -284,6 +325,60 @@ export default function LogsPage() {
     }
   };
 
+  const handleEditConnection = async (connectionId: number) => {
+    try {
+      const connection = await fetchConnection(connectionId);
+      setEditingConnection(connection);
+      setConnectionModalOpen(true);
+    } catch {
+      message.error('加载连接失败');
+    }
+  };
+
+  const handleConnectionSubmit = async (values: ConnectionFormValues) => {
+    if (!editingConnection) return;
+    try {
+      await updateConnection(editingConnection.id, values);
+      message.success('更新成功');
+      setConnectionModalOpen(false);
+      setEditingConnection(null);
+      await loadAll();
+    } catch {
+      message.error('保存失败');
+    }
+  };
+
+  const handleImmediateScan = async (record: SubscriptionTableRow) => {
+    const hide = message.loading('巡检中，库表较多时可能需要几十秒...', 0);
+    setScanningSubIds((prev) => [...prev, record.subscription_id]);
+    try {
+      const result = await scanSchemaMonitor(record.subscription_id);
+      message.success(result.message);
+      await loadAll();
+    } catch (error) {
+      const detail = extractScanError(error, '巡检失败');
+      Modal.warning({
+        title: '无法立即巡检',
+        content: detail,
+        okText: '去修改',
+        onOk: () => handleEditConnection(record.connection_id),
+      });
+    } finally {
+      hide();
+      setScanningSubIds((prev) => prev.filter((id) => id !== record.subscription_id));
+    }
+  };
+
+  const renderUpdatedAt = (value: string | null | undefined) => {
+    if (!value) return null;
+    const formatted = formatBeijingTime(value);
+    return formatted ? (
+      <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+        {formatted}
+      </Typography.Text>
+    ) : null;
+  };
+
   return (
     <div className="tab-page">
       <div className="tab-page-toolbar">
@@ -312,11 +407,20 @@ export default function LogsPage() {
         onSaved={resolveWebhookBase}
       />
 
-      <SchemaMonitorModal
-        open={schemaMonitorOpen}
-        subscriptionId={schemaMonitorSubId}
-        connectionName={schemaMonitorName}
-        onClose={() => setSchemaMonitorOpen(false)}
+      <ConnectionFormModal
+        open={connectionModalOpen}
+        connection={editingConnection}
+        projectOptions={projects.options}
+        environmentOptions={environments.options}
+        labelOptions={labels.options}
+        labelItems={labels.items}
+        groupOptions={connectionGroups.options}
+        groupItems={connectionGroups.items}
+        onCancel={() => {
+          setConnectionModalOpen(false);
+          setEditingConnection(null);
+        }}
+        onSubmit={handleConnectionSubmit}
       />
 
       <Form form={subForm} layout="inline" style={{ marginBottom: 12 }} onValuesChange={handleSubFilterChange}>
@@ -335,21 +439,25 @@ export default function LogsPage() {
         dataSource={tableData}
         pagination={false}
         style={{ marginBottom: 24 }}
-        defaultExpandAllRows
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1280 }}
+        expandable={{
+          defaultExpandAllRows: true,
+          rowExpandable: (record) => (record.children?.length ?? 0) > 0,
+        }}
         locale={{ emptyText: '暂无 GitLab / 数据库类型连接' }}
         columns={[
           {
             title: '名称',
             dataIndex: 'name',
-            width: 160,
-            ellipsis: true,
+            width: 280,
             render: (v: string, record) =>
               record.isConnection ? (
-                <Space size={4}>
+                <Space size={[4, 4]} wrap>
                   <Typography.Text strong>{v}</Typography.Text>
                   {record.connection_type_name ? (
-                    <Tag color="orange">{record.connection_type_name}</Tag>
+                    <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                      {record.connection_type_name}
+                    </Tag>
                   ) : null}
                 </Space>
               ) : (
@@ -375,10 +483,13 @@ export default function LogsPage() {
           {
             title: '地址',
             dataIndex: 'url',
-            ellipsis: true,
+            width: 220,
             render: (v: string | undefined) =>
               v ? (
-                <Typography.Text copyable ellipsis={{ tooltip: v }}>
+                <Typography.Text
+                  copyable
+                  style={{ fontSize: 12, wordBreak: 'break-all', whiteSpace: 'normal' }}
+                >
                   {v}
                 </Typography.Text>
               ) : null,
@@ -386,11 +497,17 @@ export default function LogsPage() {
           {
             title: '分支',
             dataIndex: 'branch',
-            width: 100,
+            width: 88,
             render: (v: string | undefined) => {
               if (!v || v === '-') return null;
               return <Tag>{v}</Tag>;
             },
+          },
+          {
+            title: '更新时间',
+            dataIndex: 'updated_at',
+            width: 156,
+            render: (v: string | null | undefined) => renderUpdatedAt(v),
           },
           {
             title: '启用',
@@ -407,22 +524,36 @@ export default function LogsPage() {
           },
           {
             title: '操作',
-            width: 110,
-            render: (_, record) =>
-              record.isConnection && record.connection_type_name?.includes('数据库') ? (
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<DatabaseOutlined />}
-                  onClick={() => {
-                    setSchemaMonitorSubId(record.subscription_id);
-                    setSchemaMonitorName(record.name);
-                    setSchemaMonitorOpen(true);
-                  }}
-                >
-                  结构巡检
-                </Button>
-              ) : null,
+            width: 168,
+            fixed: 'right',
+            render: (_, record) => {
+              if (!record.isConnection) return null;
+              return (
+                <Space size={6} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<EditOutlined />}
+                    style={{ paddingInline: 0 }}
+                    onClick={() => handleEditConnection(record.connection_id)}
+                  >
+                    编辑
+                  </Button>
+                  {isDatabaseConnection(record.connection_type_name) ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<DatabaseOutlined />}
+                      style={{ paddingInline: 0 }}
+                      loading={scanningSubIds.includes(record.subscription_id)}
+                      onClick={() => handleImmediateScan(record)}
+                    >
+                      立即巡检
+                    </Button>
+                  ) : null}
+                </Space>
+              );
+            },
           },
         ]}
       />
@@ -525,26 +656,6 @@ export default function LogsPage() {
         ]}
       />
 
-      <SchemaChangeModal
-        log={schemaChangeLog}
-        open={schemaChangeOpen}
-        onClose={() => {
-          setSchemaChangeOpen(false);
-          setSchemaChangeLog(null);
-        }}
-      />
-      <CommitDiffModal
-        logId={diffLogId}
-        commitSha={diffCommitSha}
-        summary={diffSummary}
-        open={diffOpen}
-        onClose={() => {
-          setDiffOpen(false);
-          setDiffLogId(null);
-          setDiffCommitSha(null);
-          setDiffSummary(null);
-        }}
-      />
       <CommitAiAnalysisModal
         logId={aiLogId}
         commitSha={aiCommitSha}
@@ -557,6 +668,7 @@ export default function LogsPage() {
           setAiSummary(null);
         }}
       />
+      {detailModals}
     </div>
   );
 }
