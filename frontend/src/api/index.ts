@@ -607,3 +607,76 @@ export async function syncSubscriptionApi(subscriptionId: number, linkKey?: stri
   );
   return data;
 }
+
+export async function fetchApiTestCases(params?: {
+  project_id?: number;
+  environment_id?: number;
+  service?: string;
+  endpoint_id?: string;
+  keyword?: string;
+  status?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  const { data } = await client.get<import('../types/apiTestCase').ApiTestCaseList>(
+    '/api/api-test-cases',
+    { params },
+  );
+  return data;
+}
+
+export async function fetchApiTestCase(id: number) {
+  const { data } = await client.get<import('../types/apiTestCase').ApiTestCase>(
+    `/api/api-test-cases/${id}`,
+  );
+  return data;
+}
+
+export async function createApiTestCase(payload: import('../types/apiTestCase').ApiTestCaseFormValues) {
+  const { data } = await client.post<import('../types/apiTestCase').ApiTestCase>(
+    '/api/api-test-cases',
+    payload,
+  );
+  return data;
+}
+
+export async function updateApiTestCase(
+  id: number,
+  payload: Partial<import('../types/apiTestCase').ApiTestCaseFormValues>,
+) {
+  const { data } = await client.put<import('../types/apiTestCase').ApiTestCase>(
+    `/api/api-test-cases/${id}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteApiTestCase(id: number) {
+  await client.delete(`/api/api-test-cases/${id}`);
+}
+
+export async function restoreApiTestCase(id: number) {
+  const { data } = await client.post<import('../types/apiTestCase').ApiTestCase>(
+    `/api/api-test-cases/${id}/restore`,
+  );
+  return data;
+}
+
+export async function generateApiTestCasesFromEndpoint(payload: {
+  endpoint_id: string;
+  project_id: number;
+  environment_id: number;
+  service: string;
+  method: string;
+  api_path: string;
+  summary?: string;
+  parameters?: import('../types/apiMonitor').ApiMonitorParameter[];
+  expected_status?: number;
+  expected_response?: string;
+}) {
+  const { data } = await client.post<{
+    items: import('../types/apiTestCase').ApiTestCase[];
+    created: number;
+  }>('/api/api-test-cases/generate-from-endpoint', payload);
+  return data;
+}

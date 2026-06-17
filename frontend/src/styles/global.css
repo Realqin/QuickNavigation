@@ -1390,6 +1390,28 @@ html:has(.embedded-console-page--standalone) body {
 
 
 
+.api-case-page__filters {
+
+  margin-bottom: 16px;
+
+  row-gap: 12px;
+
+}
+
+
+
+.api-case-page__pagination {
+
+  display: flex;
+
+  justify-content: flex-end;
+
+  margin-top: 16px;
+
+}
+
+
+
 /* ---- Home page ---- */
 
 .home-page {
@@ -2320,6 +2342,98 @@ html:has(.embedded-console-page--standalone) body {
   color: #94a3b8;
 
   font-size: 12px;
+
+}
+
+
+
+.api-monitor-cases {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 16px;
+
+  min-height: 100%;
+
+  padding: 4px 0 16px;
+
+}
+
+
+
+.api-monitor-cases__header {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 8px;
+
+}
+
+
+
+.api-monitor-cases__toolbar {
+
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 12px;
+
+}
+
+
+
+.api-monitor-cases__table {
+
+  margin-top: 0;
+
+}
+
+
+
+.api-monitor-cases__execute-result {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 8px;
+
+}
+
+
+
+.api-monitor-cases__execute-body {
+
+  margin: 0;
+
+  padding: 12px;
+
+  max-height: 360px;
+
+  overflow: auto;
+
+  background: #f6f8fa;
+
+  border: 1px solid #e5e7eb;
+
+  border-radius: 6px;
+
+  font-size: 12px;
+
+  line-height: 1.5;
+
+  white-space: pre-wrap;
+
+  word-break: break-word;
 
 }
 

@@ -202,6 +202,32 @@ class ApiEndpointChange(Base):
     scan_run: Mapped["ApiScanRun"] = relationship(back_populates="endpoint_changes")
 
 
+class ApiTestCase(Base):
+    """接口自动化用例（手工维护 + 后续扫描同步）。"""
+
+    __tablename__ = "api_test_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    service: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    api_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    method: Mapped[str] = mapped_column(String(16), nullable=False, default="GET")
+    request_params: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_status: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
+    expected_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    case_type: Mapped[str] = mapped_column(String(32), nullable=False, default="smoke", index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    endpoint_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class KafkaConsoleConnection(Base):
     """连接方式 → Kafka 菜单专用，与 connections 表互不影响。"""
 

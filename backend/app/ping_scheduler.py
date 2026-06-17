@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime
 
@@ -6,15 +5,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import SessionLocal
 from app.models import Connection
-from app.ping_service import check_url_reachable
+from app.ping_service import ping_urls
 
 logger = logging.getLogger(__name__)
 
 PING_INTERVAL_SECONDS = 180
-
-
-async def ping_connection_url(url: str) -> bool:
-    return await check_url_reachable(url)
 
 
 def _update_sub_link_status(sub_links: list, index: int, reachable: bool, checked_at: datetime) -> list:
@@ -28,6 +23,8 @@ async def ping_connection_record(
     connection_id: int,
     sub_index: int | None = None,
 ) -> Connection | None:
+    from app.ping_service import check_url_reachable
+
     db = SessionLocal()
     try:
         connection = db.query(Connection).filter(Connection.id == connection_id).first()
@@ -40,11 +37,11 @@ async def ping_connection_record(
             sub_links = connection.sub_links or []
             if sub_index < 0 or sub_index >= len(sub_links):
                 return None
-            reachable = await ping_connection_url(sub_links[sub_index]["url"])
+            reachable = await check_url_reachable(sub_links[sub_index]["url"])
             connection.sub_links = _update_sub_link_status(sub_links, sub_index, reachable, now)
             flag_modified(connection, "sub_links")
         else:
-            reachable = await ping_connection_url(connection.url)
+            reachable = await check_url_reachable(connection.url)
             connection.is_reachable = reachable
             connection.last_checked_at = now
 
@@ -55,28 +52,21 @@ async def ping_connection_record(
         db.close()
 
 
-async def _ping_connection_with_subs(connection: Connection) -> None:
-    now = datetime.utcnow()
-    main_result = await ping_connection_url(connection.url)
-    connection.is_reachable = bool(main_result)
-    connection.last_checked_at = now
+def _apply_ping_results(connection: Connection, results: dict[str, bool], checked_at: datetime) -> None:
+    main_url = (connection.url or "").strip()
+    connection.is_reachable = bool(results.get(main_url, False))
+    connection.last_checked_at = checked_at
 
     sub_links = connection.sub_links or []
     if not sub_links:
         return
 
-    results = await asyncio.gather(
-        *(ping_connection_url(item["url"]) for item in sub_links),
-        return_exceptions=True,
-    )
     updated: list[dict] = []
-    for item, result in zip(sub_links, results, strict=True):
+    for item in sub_links:
         row = dict(item)
-        if isinstance(result, Exception):
-            row["is_reachable"] = False
-        else:
-            row["is_reachable"] = bool(result)
-        row["last_checked_at"] = now.isoformat()
+        url = str(row.get("url") or "").strip()
+        row["is_reachable"] = bool(results.get(url, False))
+        row["last_checked_at"] = checked_at.isoformat()
         updated.append(row)
     connection.sub_links = updated
     flag_modified(connection, "sub_links")
@@ -89,7 +79,21 @@ async def ping_all_connections() -> int:
         if not connections:
             return 0
 
-        await asyncio.gather(*(_ping_connection_with_subs(conn) for conn in connections))
+        urls: list[str] = []
+        for connection in connections:
+            main_url = (connection.url or "").strip()
+            if main_url:
+                urls.append(main_url)
+            for item in connection.sub_links or []:
+                sub_url = str(item.get("url") or "").strip()
+                if sub_url:
+                    urls.append(sub_url)
+
+        reachability = dict(zip(urls, await ping_urls(urls), strict=False)) if urls else {}
+        checked_at = datetime.utcnow()
+        for connection in connections:
+            _apply_ping_results(connection, reachability, checked_at)
+
         db.commit()
         return len(connections)
     finally:

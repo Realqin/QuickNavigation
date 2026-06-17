@@ -5,7 +5,14 @@ export type ConnectionMethodType =
   | 'methodMqtt'
   | 'methodKafka';
 
-export type PageType = 'home' | 'connections' | 'logs' | 'dict' | 'apiMonitor' | ConnectionMethodType;
+export type PageType =
+  | 'home'
+  | 'connections'
+  | 'logs'
+  | 'dict'
+  | 'apiMonitor'
+  | 'apiCases'
+  | ConnectionMethodType;
 
 export interface AppTab {
   key: PageType;
@@ -19,6 +26,7 @@ export const PAGE_LABELS: Record<PageType, string> = {
   logs: '日志订阅',
   dict: '字典管理',
   apiMonitor: '接口监听',
+  apiCases: '接口用例',
   methodDatabase: '数据库',
   methodTerminal: 'Linux 终端',
   methodRedis: 'Redis',

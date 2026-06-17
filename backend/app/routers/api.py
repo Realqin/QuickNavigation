@@ -22,6 +22,12 @@ from app.schemas import (
     ApiMonitorServiceOut,
     ApiMonitorSpecOut,
     ApiMonitorSyncResultOut,
+    ApiTestCaseCreate,
+    ApiTestCaseGenerateIn,
+    ApiTestCaseGenerateOut,
+    ApiTestCaseListOut,
+    ApiTestCaseOut,
+    ApiTestCaseUpdate,
     ActivityLogDiffOut,
     ActivityLogOut,
     BatchDeleteRequest,
@@ -993,3 +999,100 @@ async def sync_subscription_api(
         failed=result.get("failed", 0),
         message=result["message"],
     )
+
+
+@router.get("/api-test-cases", response_model=ApiTestCaseListOut)
+def list_api_test_cases(
+    project_id: int | None = Query(None),
+    environment_id: int | None = Query(None),
+    service: str | None = Query(None),
+    endpoint_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    status: str = Query("active"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    from app.api_test_case_service import list_api_test_cases as load_api_test_cases
+
+    try:
+        return ApiTestCaseListOut(**load_api_test_cases(
+            db,
+            project_id=project_id,
+            environment_id=environment_id,
+            service=service,
+            endpoint_id=endpoint_id,
+            keyword=keyword,
+            status=status,
+            page=page,
+            page_size=page_size,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api-test-cases/{case_id}", response_model=ApiTestCaseOut)
+def get_api_test_case(case_id: int, db: Session = Depends(get_db)):
+    from app.api_test_case_service import get_api_test_case as load_api_test_case
+
+    try:
+        return ApiTestCaseOut(**load_api_test_case(db, case_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api-test-cases", response_model=ApiTestCaseOut, status_code=201)
+def create_api_test_case(payload: ApiTestCaseCreate, db: Session = Depends(get_db)):
+    from app.api_test_case_service import create_api_test_case as save_api_test_case
+
+    try:
+        return ApiTestCaseOut(**save_api_test_case(db, payload.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/api-test-cases/{case_id}", response_model=ApiTestCaseOut)
+def update_api_test_case(case_id: int, payload: ApiTestCaseUpdate, db: Session = Depends(get_db)):
+    from app.api_test_case_service import update_api_test_case as save_api_test_case
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="无更新内容")
+    try:
+        return ApiTestCaseOut(**save_api_test_case(db, case_id, data))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/api-test-cases/{case_id}", status_code=204)
+def delete_api_test_case(case_id: int, db: Session = Depends(get_db)):
+    from app.api_test_case_service import soft_delete_api_test_case
+
+    try:
+        soft_delete_api_test_case(db, case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api-test-cases/generate-from-endpoint", response_model=ApiTestCaseGenerateOut)
+def generate_api_test_cases(payload: ApiTestCaseGenerateIn, db: Session = Depends(get_db)):
+    from app.api_test_case_service import generate_api_test_cases_from_endpoint
+
+    try:
+        result = generate_api_test_cases_from_endpoint(db, payload.model_dump())
+        return ApiTestCaseGenerateOut(
+            items=[ApiTestCaseOut(**item) for item in result["items"]],
+            created=result.get("created", 0),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api-test-cases/{case_id}/restore", response_model=ApiTestCaseOut)
+def restore_api_test_case(case_id: int, db: Session = Depends(get_db)):
+    from app.api_test_case_service import restore_api_test_case as restore_case
+
+    try:
+        return ApiTestCaseOut(**restore_case(db, case_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

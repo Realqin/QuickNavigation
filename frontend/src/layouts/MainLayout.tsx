@@ -5,6 +5,7 @@ import {
   CloudServerOutlined,
   CodeOutlined,
   DatabaseOutlined,
+  ExperimentOutlined,
   HomeOutlined,
   LinkOutlined,
   MessageOutlined,
@@ -22,6 +23,7 @@ import DictPage from '../pages/DictPage';
 import HomePage from '../pages/HomePage';
 import LogsPage from '../pages/LogsPage';
 import ApiMonitorPage from '../pages/ApiMonitorPage';
+import ApiCasePage from '../pages/ApiCasePage';
 import {
   CONNECTION_METHOD_MENU_KEY,
   createTab,
@@ -50,6 +52,7 @@ const MENU_ITEMS: MenuProps['items'] = [
   },
   { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
   { key: 'apiMonitor', icon: <RadarChartOutlined />, label: PAGE_LABELS.apiMonitor },
+  { key: 'apiCases', icon: <ExperimentOutlined />, label: PAGE_LABELS.apiCases },
   { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
 ];
 
@@ -63,6 +66,8 @@ function renderTabContent(tab: AppTab) {
       return <LogsPage />;
     case 'apiMonitor':
       return <ApiMonitorPage />;
+    case 'apiCases':
+      return <ApiCasePage />;
     case 'dict':
       return <DictPage />;
     case 'methodDatabase':
@@ -195,7 +200,7 @@ export default function MainLayout() {
                 }
               }}
               items={tabItems}
-              destroyInactiveTabPane={false}
+              destroyInactiveTabPane
             />
           </Content>
         </Layout>

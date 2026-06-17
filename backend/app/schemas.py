@@ -824,3 +824,80 @@ class ApiMonitorScanRunChangesOut(BaseModel):
 
 
 ApiMonitorParameterOut.model_rebuild()
+
+
+class ApiTestCaseCreate(BaseModel):
+    project_id: int
+    environment_id: int
+    service: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=256)
+    api_path: str = Field(min_length=1, max_length=512)
+    method: str = Field(min_length=1, max_length=16)
+    request_params: str | None = None
+    request_body: str | None = None
+    expected_status: int = Field(default=200, ge=100, le=599)
+    expected_response: str | None = None
+    case_type: str = Field(default="smoke", max_length=32)
+    endpoint_id: str | None = Field(default=None, max_length=512)
+
+
+class ApiTestCaseUpdate(BaseModel):
+    project_id: int | None = None
+    environment_id: int | None = None
+    service: str | None = Field(default=None, min_length=1, max_length=128)
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    api_path: str | None = Field(default=None, min_length=1, max_length=512)
+    method: str | None = Field(default=None, min_length=1, max_length=16)
+    request_params: str | None = None
+    request_body: str | None = None
+    expected_status: int | None = Field(default=None, ge=100, le=599)
+    expected_response: str | None = None
+    case_type: str | None = Field(default=None, max_length=32)
+    endpoint_id: str | None = Field(default=None, max_length=512)
+
+
+class ApiTestCaseOut(BaseModel):
+    id: int
+    project_id: int
+    environment_id: int
+    project_display: str = ""
+    environment_display: str = ""
+    service: str
+    name: str
+    api_path: str
+    method: str
+    request_params: str | None = None
+    request_body: str | None = None
+    expected_status: int
+    expected_response: str | None = None
+    case_type: str
+    status: str
+    endpoint_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class ApiTestCaseListOut(BaseModel):
+    items: list[ApiTestCaseOut] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 10
+
+
+class ApiTestCaseGenerateIn(BaseModel):
+    endpoint_id: str = Field(min_length=1, max_length=512)
+    project_id: int
+    environment_id: int
+    service: str = Field(min_length=1, max_length=128)
+    method: str = Field(min_length=1, max_length=16)
+    api_path: str = Field(min_length=1, max_length=512)
+    summary: str = ""
+    parameters: list[dict[str, Any]] = Field(default_factory=list)
+    expected_status: int = Field(default=200, ge=100, le=599)
+    expected_response: str | None = None
+
+
+class ApiTestCaseGenerateOut(BaseModel):
+    items: list[ApiTestCaseOut] = Field(default_factory=list)
+    created: int = 0
