@@ -1,4 +1,4 @@
-import { DatabaseOutlined, GithubOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, GithubOutlined, RadarChartOutlined } from '@ant-design/icons';
 import { Badge, List, Space, Tag, Typography } from 'antd';
 import type { ActivityLog } from '../types';
 import { canOpenActivityLogDetail } from '../utils/activityLogDetail';
@@ -11,7 +11,9 @@ interface Props {
 
 const sourceIcon: Record<string, React.ReactNode> = {
   github: <GithubOutlined style={{ color: '#a371f7' }} />,
+  gitlab: <GithubOutlined style={{ color: '#a371f7' }} />,
   database: <DatabaseOutlined style={{ color: '#3fb950' }} />,
+  'api-monitor': <RadarChartOutlined style={{ color: '#61affe' }} />,
 };
 
 export default function ActivityLogPanel({ logs, onItemClick }: Props) {

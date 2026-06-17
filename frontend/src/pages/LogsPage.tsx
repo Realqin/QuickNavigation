@@ -1,4 +1,5 @@
 import {
+  CloudSyncOutlined,
   DatabaseOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -26,6 +27,7 @@ import {
   fetchPublicConfig,
   fetchSubscriptions,
   scanSchemaMonitor,
+  syncSubscriptionApi,
   updateConnection,
   updateSubscription,
 } from '../api';
@@ -37,6 +39,7 @@ import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
 import type { ActivityLog, Connection, ConnectionFormValues, GitlabSubscriptionTree } from '../types';
 import { extractCommitSha } from '../utils/activityLogDetail';
 import { formatBeijingTime } from '../utils/dateTime';
+import { getApiMonitorChangeCount, isApiMonitorChangeLog } from '../utils/apiMonitorChangeLog';
 import { getSchemaChanges, isSchemaChangeLog } from '../utils/schemaChangeLog';
 
 const ENABLED_FILTER_OPTIONS = [
@@ -44,7 +47,7 @@ const ENABLED_FILTER_OPTIONS = [
   { label: '未启用', value: false },
 ];
 
-const LOGS_PAGE_HINT = '只获取类型为 GitLab 和数据库类型的数据';
+const LOGS_PAGE_HINT = '获取 GitLab、数据库与接口监听的变更日志';
 
 interface SubscriptionTableRow {
   key: string;
@@ -63,16 +66,13 @@ interface SubscriptionTableRow {
   children?: SubscriptionTableRow[];
 }
 
-function extractCommitTime(log: ActivityLog): string | null {
+function extractActivityLogTime(log: ActivityLog): string | null {
   const committedAt = log.payload?.committed_at;
   if (typeof committedAt === 'string' && committedAt) {
     const formatted = formatBeijingTime(committedAt.trim().replace(/ UTC$/, 'Z'));
     if (formatted) {
       return formatted;
     }
-  }
-  if (log.source_type !== 'database') {
-    return null;
   }
   return formatBeijingTime(log.occurred_at);
 }
@@ -87,6 +87,9 @@ function renderActor(log: ActivityLog): string | null {
       return actor;
     }
     return '未知';
+  }
+  if (log.source_type === 'api-monitor') {
+    return log.author === 'api-monitor' ? '接口扫描' : log.author || '接口扫描';
   }
   return null;
 }
@@ -172,6 +175,10 @@ function isDatabaseConnection(typeName?: string | null): boolean {
   return Boolean(typeName?.includes('数据库'));
 }
 
+function isGitlabConnection(typeName?: string | null): boolean {
+  return Boolean(typeName?.toLowerCase().includes('gitlab'));
+}
+
 export default function LogsPage() {
   const { projects, environments, labels, connectionGroups } = useDictGroup();
   const { openActivityLogDetail, detailModals } = useActivityLogDetail();
@@ -189,6 +196,7 @@ export default function LogsPage() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [scanningSubIds, setScanningSubIds] = useState<number[]>([]);
+  const [syncingApiSubIds, setSyncingApiSubIds] = useState<number[]>([]);
 
   const tableData = useMemo(() => buildTreeRows(subs), [subs]);
 
@@ -275,6 +283,13 @@ export default function LogsPage() {
         </Button>
       );
     }
+    if (isApiMonitorChangeLog(log)) {
+      return (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openActivityLogDetail(log)}>
+          {getApiMonitorChangeCount(log)} 项
+        </Button>
+      );
+    }
     const sha = extractCommitSha(log);
     if (!sha) return null;
     return (
@@ -293,6 +308,18 @@ export default function LogsPage() {
           size="small"
           style={{ padding: 0, height: 'auto', whiteSpace: 'normal', textAlign: 'left' }}
           onClick={() => openSchemaChange(log)}
+        >
+          {summary}
+        </Button>
+      );
+    }
+    if (isApiMonitorChangeLog(log)) {
+      return (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', whiteSpace: 'normal', textAlign: 'left' }}
+          onClick={() => openActivityLogDetail(log)}
         >
           {summary}
         </Button>
@@ -319,6 +346,9 @@ export default function LogsPage() {
   const handleLinkToggle = async (subscriptionId: number, linkKey: string, checked: boolean) => {
     try {
       await updateSubscription(subscriptionId, { link_enabled: { [linkKey]: checked } });
+      if (checked) {
+        message.success('已启用');
+      }
       await loadSubscriptions();
     } catch {
       message.error('更新订阅失败');
@@ -360,12 +390,39 @@ export default function LogsPage() {
       Modal.warning({
         title: '无法立即巡检',
         content: detail,
+        closable: true,
         okText: '去修改',
         onOk: () => handleEditConnection(record.connection_id),
       });
     } finally {
       hide();
       setScanningSubIds((prev) => prev.filter((id) => id !== record.subscription_id));
+    }
+  };
+
+  const handleSyncApiCode = async (record: SubscriptionTableRow) => {
+    const hide = message.loading('正在拉取最新代码并生成接口文档...', 0);
+    setSyncingApiSubIds((prev) => [...prev, record.subscription_id]);
+    try {
+      const result = await syncSubscriptionApi(record.subscription_id);
+      if (result.failed > 0) {
+        message.warning(result.message);
+      } else {
+        message.success(result.message);
+      }
+      await loadAll();
+    } catch (error) {
+      const detail = extractScanError(error, '获取最新代码失败');
+      Modal.warning({
+        title: '无法获取最新代码',
+        content: detail,
+        closable: true,
+        okText: '去修改',
+        onOk: () => handleEditConnection(record.connection_id),
+      });
+    } finally {
+      hide();
+      setSyncingApiSubIds((prev) => prev.filter((id) => id !== record.subscription_id));
     }
   };
 
@@ -449,11 +506,14 @@ export default function LogsPage() {
           {
             title: '名称',
             dataIndex: 'name',
-            width: 280,
+            width: 200,
+            ellipsis: true,
             render: (v: string, record) =>
               record.isConnection ? (
                 <Space size={[4, 4]} wrap>
-                  <Typography.Text strong>{v}</Typography.Text>
+                  <Typography.Text strong ellipsis={{ tooltip: v }}>
+                    {v}
+                  </Typography.Text>
                   {record.connection_type_name ? (
                     <Tag color="orange" style={{ marginInlineEnd: 0 }}>
                       {record.connection_type_name}
@@ -461,7 +521,9 @@ export default function LogsPage() {
                   ) : null}
                 </Space>
               ) : (
-                <Typography.Text type="secondary">{v}</Typography.Text>
+                <Typography.Text type="secondary" ellipsis={{ tooltip: v }}>
+                  {v}
+                </Typography.Text>
               ),
           },
           {
@@ -483,7 +545,7 @@ export default function LogsPage() {
           {
             title: '地址',
             dataIndex: 'url',
-            width: 220,
+            width: 300,
             render: (v: string | undefined) =>
               v ? (
                 <Typography.Text
@@ -524,7 +586,7 @@ export default function LogsPage() {
           },
           {
             title: '操作',
-            width: 168,
+            width: 248,
             fixed: 'right',
             render: (_, record) => {
               if (!record.isConnection) return null;
@@ -551,6 +613,18 @@ export default function LogsPage() {
                       立即巡检
                     </Button>
                   ) : null}
+                  {isGitlabConnection(record.connection_type_name) ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<CloudSyncOutlined />}
+                      style={{ paddingInline: 0 }}
+                      loading={syncingApiSubIds.includes(record.subscription_id)}
+                      onClick={() => handleSyncApiCode(record)}
+                    >
+                      获取最新代码
+                    </Button>
+                  ) : null}
                 </Space>
               );
             },
@@ -574,6 +648,7 @@ export default function LogsPage() {
             options={[
               { label: 'GitLab', value: 'gitlab' },
               { label: '数据库', value: 'database' },
+              { label: '接口监听', value: 'api-monitor' },
             ]}
           />
         </Form.Item>
@@ -588,7 +663,7 @@ export default function LogsPage() {
         rowKey="id"
         loading={loading}
         dataSource={logs}
-        pagination={{ pageSize: 15 }}
+        pagination={{ pageSize: 10 }}
         scroll={{ x: 1100 }}
         columns={[
           {
@@ -637,7 +712,7 @@ export default function LogsPage() {
           {
             title: '时间',
             width: 170,
-            render: (_, record) => extractCommitTime(record),
+            render: (_, record) => extractActivityLogTime(record),
           },
           {
             title: '操作',

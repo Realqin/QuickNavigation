@@ -38,6 +38,7 @@ const { Content, Sider } = Layout;
 const EXPAND_KEY = 'quicknav-collapse';
 const PROJECT_KEY = 'quicknav-project';
 const ENV_KEY = 'quicknav-environment';
+const HOME_LOG_LIMIT = 8;
 
 function loadStorageNumber(key: string): number | null {
   const raw = localStorage.getItem(key);
@@ -94,7 +95,7 @@ export default function HomePage() {
     try {
       const [home, logList] = await Promise.all([
         fetchHome(resolvedProject, resolvedEnvironment),
-        fetchLogs({ project: resolvedProject, environment: resolvedEnvironment, limit: 50 }),
+        fetchLogs({ project: resolvedProject, environment: resolvedEnvironment, limit: HOME_LOG_LIMIT }),
       ]);
       setGroups(home.groups);
       setExpandedMap((prev) => {
@@ -135,7 +136,7 @@ export default function HomePage() {
         log.project === String(resolvedProject) &&
         log.environment === String(resolvedEnvironment)
       ) {
-        setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, 50));
+        setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, HOME_LOG_LIMIT));
       }
     });
     return () => ws.close();

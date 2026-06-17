@@ -203,6 +203,73 @@ function TypeFields({
     );
   }
 
+  if (kind === 'gitlab') {
+    return (
+      <>
+        <Form.Item
+          name="url"
+          label="仓库 URL"
+          rules={[{ required: true, message: '请输入仓库浏览地址' }]}
+          extra="GitLab 项目浏览地址，需包含分支，如 .../-/tree/main"
+        >
+          <Input placeholder="https://gitlab.example.com/group/project/-/tree/main" />
+        </Form.Item>
+        <Form.Item
+          name="host"
+          label="Clone 地址"
+          extra="可选，支持 SSH（git@...）或 HTTPS 格式；用于 git clone 拉取代码"
+        >
+          <Input placeholder="git@gitlab.example.com:group/project.git 或 https://gitlab.example.com/group/project.git" />
+        </Form.Item>
+        <Form.List name="sub_links">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <div key={key} className="connection-form-modal__gitlab-sub-link-row">
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'name']}
+                    rules={[{ required: true, message: '名称' }]}
+                    className="connection-form-modal__sub-link-name"
+                  >
+                    <Input placeholder="子项名称" />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'url']}
+                    rules={[{ required: true, message: '仓库 URL' }]}
+                    className="connection-form-modal__sub-link-url"
+                  >
+                    <Input placeholder="仓库 URL" />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'clone_url']}
+                    className="connection-form-modal__sub-link-clone"
+                  >
+                    <Input placeholder="Clone 地址（SSH 或 HTTPS，可选）" />
+                  </Form.Item>
+                  <MinusCircleOutlined
+                    onClick={() => remove(name)}
+                    style={{ color: '#ff4d4f', marginTop: 8 }}
+                  />
+                </div>
+              ))}
+              <Button
+                type="dashed"
+                onClick={() => add({ name: '', url: '', clone_url: '' })}
+                icon={<PlusOutlined />}
+                className="connection-form-modal__sub-link-add"
+              >
+                添加子链接
+              </Button>
+            </>
+          )}
+        </Form.List>
+      </>
+    );
+  }
+
   const passwordPlaceholder =
     kind === 'database'
       ? passwordSet
@@ -358,7 +425,9 @@ export default function ConnectionFormModal({
   ]);
 
   useEffect(() => {
-    if (!open || connection || connectionKind === 'kafka') return;
+    if (!open || connection || connectionKind === 'kafka' || connectionKind === 'gitlab' || connectionKind === 'other') {
+      return;
+    }
     const defaultPort = DEFAULT_PORTS[connectionKind];
     if (defaultPort != null) {
       form.setFieldValue('port', defaultPort);
@@ -416,6 +485,14 @@ export default function ConnectionFormModal({
       payload.sub_links = (values.sub_links ?? []).filter(
         (item) => item?.name?.trim() && item?.url?.trim(),
       );
+    } else if (connectionKind === 'gitlab') {
+      payload.sub_links = (values.sub_links ?? []).filter(
+        (item) => item?.name?.trim() && item?.url?.trim(),
+      );
+      payload.host = values.host?.trim() || '';
+      payload.port = undefined;
+      payload.username = undefined;
+      payload.password = undefined;
     } else if (connectionKind === 'mqtt') {
       payload.url = '';
       payload.sub_links = [];
@@ -465,9 +542,16 @@ export default function ConnectionFormModal({
               ? connection
                 ? '编辑 Kafka 连接'
                 : '新增 Kafka 连接'
-              : connection
+              : connectionKind === 'gitlab'
+                ? connection
+                  ? '编辑 GitLab 连接'
+                  : '新增 GitLab 连接'
+                : connection
             ? '编辑连接'
             : '新增连接';
+
+  const modalWidth =
+    connectionKind === 'gitlab' ? 760 : connectionKind === 'other' ? 540 : 460;
 
   return (
     <Modal
@@ -476,7 +560,7 @@ export default function ConnectionFormModal({
       onCancel={onCancel}
       onOk={handleOk}
       destroyOnClose
-      width={connectionKind === 'other' ? 540 : 460}
+      width={modalWidth}
       className="connection-form-modal"
       styles={{ body: { paddingTop: 16, paddingBottom: 12 } }}
     >

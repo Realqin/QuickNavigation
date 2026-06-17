@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     redisinsight_internal_url: str = "http://127.0.0.1:5540"
     redisinsight_public_port: int = 5540
     redisinsight_redis_host: str = "127.0.0.1"
+    api_repo_cache_dir: str = str(_PROJECT_ROOT / "data" / "api-repos")
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

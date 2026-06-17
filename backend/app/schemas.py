@@ -66,9 +66,17 @@ class DictItemOut(BaseModel):
         )
 
 
+def _optional_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.lower() in {"", "none", "null"}:
+        return ""
+    return text
+
+
 class SubLinkItem(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(min_length=1, max_length=512)
+    clone_url: str | None = Field(default=None, max_length=512)
     is_reachable: bool | None = None
     last_checked_at: datetime | str | None = None
 
@@ -135,11 +143,13 @@ class ConnectionBase(BaseModel):
             if isinstance(item, dict):
                 name = str(item.get("name", "")).strip()
                 url = str(item.get("url", "")).strip()
+                clone_url = _optional_text(item.get("clone_url"))
                 if name and url:
                     cleaned.append(
                         {
                             "name": name,
                             "url": url,
+                            "clone_url": clone_url or None,
                             "is_reachable": item.get("is_reachable"),
                             "last_checked_at": item.get("last_checked_at"),
                         }
@@ -196,7 +206,7 @@ class ConnectionUpdate(BaseModel):
     sort_order: int | None = None
     icon: str | None = None
     sub_links: list[SubLinkItem] | None = None
-    host: str | None = Field(default=None, max_length=256)
+    host: str | None = Field(default=None, max_length=512)
     port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=512)
@@ -333,12 +343,15 @@ class GitlabSubscriptionLinkOut(BaseModel):
     link_key: str
     name: str
     url: str
+    clone_url: str = ""
     branch: str
     repo_path: str = ""
     enabled: bool
     link_kind: str = "gitlab"
     webhook_secret: str | None = None
     last_updated_at: datetime | None = None
+    api_scan_status: str | None = None
+    api_endpoint_count: int = 0
 
 
 class GitlabSubscriptionTreeOut(BaseModel):
@@ -625,3 +638,189 @@ class RepoAccessSettingsUpdate(BaseModel):
     gitlab_token: str | None = None
     github_token: str | None = None
     public_webhook_base_url: str | None = None
+
+
+class ApiMonitorParameterOut(BaseModel):
+    name: str
+    in_: str = Field(alias="in")
+    required: bool = False
+    data_type: str = "any"
+    description: str = ""
+    schema_name: str | None = None
+    children: list["ApiMonitorParameterOut"] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
+class ApiMonitorResponseOut(BaseModel):
+    status_code: str
+    description: str = ""
+    data_type: str = ""
+    schema_name: str | None = None
+    properties: list[ApiMonitorParameterOut] = Field(default_factory=list)
+
+
+class ApiMonitorEndpointOut(BaseModel):
+    id: str
+    method: str
+    path: str
+    summary: str
+    tags: list[str] = Field(default_factory=list)
+    request_content_type: str = ""
+    response_content_type: str = ""
+    parameters: list[ApiMonitorParameterOut] = Field(default_factory=list)
+    responses: list[ApiMonitorResponseOut] = Field(default_factory=list)
+    source: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApiMonitorGroupOut(BaseModel):
+    tag: str
+    endpoints: list[ApiMonitorEndpointOut] = Field(default_factory=list)
+
+
+class ApiMonitorSpecOut(BaseModel):
+    spec_version: int = 1
+    meta: dict[str, Any] = Field(default_factory=dict)
+    groups: list[ApiMonitorGroupOut] = Field(default_factory=list)
+    endpoints: list[ApiMonitorEndpointOut] = Field(default_factory=list)
+    endpoint_count: int = 0
+
+
+class ApiMonitorServiceOut(BaseModel):
+    id: str
+    connection_id: int
+    subscription_id: int | None = None
+    link_key: str
+    name: str
+    connection_name: str
+    repo_path: str
+    branch: str | None = None
+    provider: str | None = None
+    projects: list[int] = Field(default_factory=list)
+    environments: list[int] = Field(default_factory=list)
+    project_display: str = ""
+    environment_display: str = ""
+    connection_type_name: str | None = None
+    endpoint_count: int = 0
+    last_scan_at: datetime | None = None
+    scan_status: str | None = None
+    has_snapshot: bool = False
+
+
+class ApiMonitorFilterOptionOut(BaseModel):
+    id: int
+    name: str
+
+
+class ApiMonitorNameOptionOut(BaseModel):
+    id: str
+    label: str
+
+
+class ApiMonitorFilterOptionsOut(BaseModel):
+    projects: list[ApiMonitorFilterOptionOut] = Field(default_factory=list)
+    environments: list[ApiMonitorFilterOptionOut] = Field(default_factory=list)
+    names: list[ApiMonitorNameOptionOut] = Field(default_factory=list)
+
+
+class ApiMonitorGroupSummaryOut(BaseModel):
+    tag: str
+    endpoint_count: int = 0
+
+
+class ApiMonitorModuleSummaryOut(BaseModel):
+    name: str
+    endpoint_count: int = 0
+
+
+class ApiMonitorModulesOut(BaseModel):
+    service_id: str
+    modules: list[ApiMonitorModuleSummaryOut] = Field(default_factory=list)
+
+
+class ApiMonitorGroupsOut(BaseModel):
+    service_id: str
+    module: str | None = None
+    display_name: str = ""
+    endpoint_count: int = 0
+    has_snapshot: bool = False
+    scan_status: str | None = None
+    repo_path: str = ""
+    branch: str | None = None
+    project_display: str = ""
+    environment_display: str = ""
+    groups: list[ApiMonitorGroupSummaryOut] = Field(default_factory=list)
+
+
+class ApiMonitorEndpointSummaryOut(BaseModel):
+    id: str
+    method: str
+    path: str
+    summary: str
+
+
+class ApiMonitorGroupEndpointsOut(BaseModel):
+    tag: str
+    endpoints: list[ApiMonitorEndpointSummaryOut] = Field(default_factory=list)
+
+
+class ApiMonitorProxyIn(BaseModel):
+    method: str
+    url: str
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str | None = None
+
+
+class ApiMonitorProxyOut(BaseModel):
+    status_code: int
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str = ""
+    elapsed_ms: int = 0
+
+
+class ApiMonitorSyncResultOut(BaseModel):
+    subscription_id: int
+    synced: int
+    skipped: int = 0
+    failed: int = 0
+    message: str
+
+
+class ApiMonitorScanRunOut(BaseModel):
+    id: int
+    subscription_id: int
+    link_key: str
+    commit_sha: str | None = None
+    commit_message: str | None = None
+    branch: str | None = None
+    is_baseline: bool = False
+    endpoint_count_before: int = 0
+    endpoint_count_after: int = 0
+    added_count: int = 0
+    modified_count: int = 0
+    removed_count: int = 0
+    scanned_at: datetime
+
+
+class ApiMonitorEndpointChangeOut(BaseModel):
+    id: int
+    scan_run_id: int
+    endpoint_key: str
+    change_type: str
+    tag: str
+    summary: str
+    source_file: str | None = None
+    source_line: int | None = None
+    created_at: datetime
+    before_json: dict[str, Any] | None = None
+    after_json: dict[str, Any] | None = None
+    diff_json: dict[str, Any] | None = None
+    scan_run: ApiMonitorScanRunOut | None = None
+
+
+class ApiMonitorScanRunChangesOut(BaseModel):
+    scan_run: ApiMonitorScanRunOut
+    changes: list[ApiMonitorEndpointChangeOut] = Field(default_factory=list)
+
+
+ApiMonitorParameterOut.model_rebuild()

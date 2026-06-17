@@ -8,6 +8,20 @@ from app.database import get_db
 from app.repo_access_config import get_public_webhook_base_url
 from app.models import Connection, DictItem, Subscription
 from app.schemas import (
+    ApiMonitorEndpointChangeOut,
+    ApiMonitorEndpointOut,
+    ApiMonitorGroupEndpointsOut,
+    ApiMonitorGroupOut,
+    ApiMonitorGroupsOut,
+    ApiMonitorModulesOut,
+    ApiMonitorFilterOptionsOut,
+    ApiMonitorProxyIn,
+    ApiMonitorProxyOut,
+    ApiMonitorScanRunChangesOut,
+    ApiMonitorScanRunOut,
+    ApiMonitorServiceOut,
+    ApiMonitorSpecOut,
+    ApiMonitorSyncResultOut,
     ActivityLogDiffOut,
     ActivityLogOut,
     BatchDeleteRequest,
@@ -102,6 +116,7 @@ from app.config import settings
 from app.services import (
     connection_environment_display,
     connection_is_database_type,
+    connection_is_gitlab_type,
     connection_is_kafka_type,
     connection_is_mqtt_type,
     connection_is_redis_type,
@@ -644,13 +659,25 @@ def get_subscriptions(
 
 
 @router.patch("/subscriptions/{subscription_id}", response_model=GitlabSubscriptionTreeOut)
-def patch_subscription(
+async def patch_subscription(
     subscription_id: int, data: SubscriptionUpdate, db: Session = Depends(get_db)
 ):
+    from app.api_monitor_service import resolve_link_target, schedule_api_monitor_sync
+
     sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    old_enabled = dict(sub.link_enabled or {})
     update_subscription(db, sub, data)
+    db.refresh(sub)
+    conn = sub.connection
+    if conn and connection_is_gitlab_type(db, conn):
+        new_enabled = dict(sub.link_enabled or {})
+        for link_key, enabled in new_enabled.items():
+            if enabled and not old_enabled.get(link_key):
+                target = resolve_link_target(conn, link_key)
+                if target and str(target.get("clone_url") or "").strip():
+                    schedule_api_monitor_sync(sub.id, link_key, baseline_only=True)
     trees = list_gitlab_subscription_trees(db)
     for tree in trees:
         if tree["id"] == subscription_id:
@@ -786,3 +813,183 @@ def mark_log_read(log_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(log)
     return log
+
+
+@router.get("/api-monitor/filter-options", response_model=ApiMonitorFilterOptionsOut)
+def get_api_monitor_filter_options(
+    project: int | None = Query(None),
+    environment: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import list_api_monitor_filter_options
+
+    return list_api_monitor_filter_options(db, project=project, environment=environment)
+
+
+@router.get("/api-monitor/services", response_model=list[ApiMonitorServiceOut])
+def get_api_monitor_services(
+    project: int | None = Query(None),
+    environment: int | None = Query(None),
+    name: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import list_api_monitor_services
+
+    return list_api_monitor_services(db, project=project, environment=environment, name=name)
+
+
+@router.get("/api-monitor/services/{service_id}/modules", response_model=ApiMonitorModulesOut)
+def get_api_monitor_modules(service_id: str, db: Session = Depends(get_db)):
+    from app.api_monitor_service import list_api_monitor_modules
+
+    try:
+        return ApiMonitorModulesOut(**list_api_monitor_modules(db, service_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api-monitor/services/{service_id}/spec", response_model=ApiMonitorSpecOut)
+def get_api_monitor_spec(
+    service_id: str,
+    module: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import get_api_monitor_spec as load_api_monitor_spec
+
+    try:
+        return ApiMonitorSpecOut(**load_api_monitor_spec(db, service_id, module=module))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api-monitor/services/{service_id}/groups", response_model=ApiMonitorGroupsOut)
+def get_api_monitor_groups(
+    service_id: str,
+    module: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import get_api_monitor_groups
+
+    try:
+        return ApiMonitorGroupsOut(**get_api_monitor_groups(db, service_id, module=module))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/api-monitor/services/{service_id}/groups/{tag}/endpoints",
+    response_model=ApiMonitorGroupEndpointsOut,
+)
+def get_api_monitor_group_endpoints(
+    service_id: str,
+    tag: str,
+    module: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import get_api_monitor_group_endpoints
+
+    try:
+        return ApiMonitorGroupEndpointsOut(
+            **get_api_monitor_group_endpoints(db, service_id, tag, module=module)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/api-monitor/services/{service_id}/endpoints/{endpoint_id:path}/changes",
+    response_model=list[ApiMonitorEndpointChangeOut],
+)
+def get_api_monitor_endpoint_changes(
+    service_id: str,
+    endpoint_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import list_api_monitor_endpoint_changes
+
+    try:
+        return list_api_monitor_endpoint_changes(db, service_id, endpoint_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api-monitor/services/{service_id}/endpoints/{endpoint_id:path}", response_model=ApiMonitorEndpointOut)
+def get_api_monitor_endpoint(service_id: str, endpoint_id: str, db: Session = Depends(get_db)):
+    from app.api_monitor_service import get_api_monitor_endpoint as load_api_monitor_endpoint
+
+    try:
+        return ApiMonitorEndpointOut(**load_api_monitor_endpoint(db, service_id, endpoint_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api-monitor/services/{service_id}/scan-runs", response_model=list[ApiMonitorScanRunOut])
+def get_api_monitor_scan_runs(
+    service_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import list_api_monitor_scan_runs
+
+    try:
+        return list_api_monitor_scan_runs(db, service_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/api-monitor/services/{service_id}/scan-runs/{scan_run_id}/changes",
+    response_model=ApiMonitorScanRunChangesOut,
+)
+def get_api_monitor_scan_run_changes(service_id: str, scan_run_id: int, db: Session = Depends(get_db)):
+    from app.api_monitor_service import list_api_monitor_scan_run_changes
+
+    try:
+        return ApiMonitorScanRunChangesOut(**list_api_monitor_scan_run_changes(db, service_id, scan_run_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api-monitor/proxy", response_model=ApiMonitorProxyOut)
+async def post_api_monitor_proxy(payload: ApiMonitorProxyIn):
+    from app.api_monitor_service import proxy_api_monitor_request
+
+    try:
+        return ApiMonitorProxyOut(
+            **await proxy_api_monitor_request(
+                method=payload.method,
+                url=payload.url,
+                headers=payload.headers,
+                body=payload.body,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/subscriptions/{subscription_id}/api-sync",
+    response_model=ApiMonitorSyncResultOut,
+)
+async def sync_subscription_api(
+    subscription_id: int,
+    link_key: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.api_monitor_service import sync_subscription_api_links
+
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        result = await sync_subscription_api_links(db, sub, link_key=link_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ApiMonitorSyncResultOut(
+        subscription_id=subscription_id,
+        synced=result["synced"],
+        skipped=result.get("skipped", 0),
+        failed=result.get("failed", 0),
+        message=result["message"],
+    )

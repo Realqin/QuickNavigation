@@ -1,6 +1,7 @@
 export interface SubLink {
   name: string;
   url: string;
+  clone_url?: string | null;
   is_reachable?: boolean | null;
   last_checked_at?: string | null;
 }
@@ -101,12 +102,15 @@ export interface GitlabSubscriptionLink {
   link_key: string;
   name: string;
   url: string;
+  clone_url?: string;
   branch: string;
   repo_path?: string;
   enabled: boolean;
   link_kind?: 'gitlab' | 'database';
   webhook_secret?: string | null;
   last_updated_at?: string | null;
+  api_scan_status?: string | null;
+  api_endpoint_count?: number;
 }
 
 export interface GitlabSubscriptionTree {

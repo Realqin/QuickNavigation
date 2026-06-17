@@ -2,7 +2,7 @@ import json
 
 import secrets
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from typing import Any
 
@@ -54,6 +54,7 @@ LABEL_TERMINAL = "终端模拟器"
 LABEL_REDIS = "Redis"
 LABEL_MQTT = "MQTT"
 LABEL_KAFKA = "Kafka"
+LABEL_GITLAB = "GitLab 仓库"
 SYSTEM_LABEL_NAMES = {
     LABEL_OTHER,
     LABEL_DATABASE,
@@ -61,6 +62,7 @@ SYSTEM_LABEL_NAMES = {
     LABEL_REDIS,
     LABEL_MQTT,
     LABEL_KAFKA,
+    LABEL_GITLAB,
 }
 
 FILTER_EMPTY = 0  # 筛选「其他」：项目/环境未填写
@@ -122,6 +124,7 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
             name = str(item.get("name", "")).strip()
 
             url = str(item.get("url", "")).strip()
+            clone_url = _optional_clone_url(item.get("clone_url"))
 
             is_reachable = item.get("is_reachable")
 
@@ -132,6 +135,7 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
             name = str(getattr(item, "name", "")).strip()
 
             url = str(getattr(item, "url", "")).strip()
+            clone_url = _optional_clone_url(getattr(item, "clone_url", None))
 
             is_reachable = getattr(item, "is_reachable", None)
 
@@ -140,6 +144,8 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if name and url:
 
             row: dict[str, Any] = {"name": name, "url": url}
+            if clone_url:
+                row["clone_url"] = clone_url
 
             if is_reachable is not None:
 
@@ -182,6 +188,13 @@ def _normalize_connection_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _optional_clone_url(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.lower() in {"", "none", "null"}:
+        return ""
+    return text
+
+
 def get_label_kind(db: Session, type_id: int) -> str:
     item = get_dict_item(db, type_id, DICT_LABEL)
     if not item:
@@ -196,6 +209,8 @@ def get_label_kind(db: Session, type_id: int) -> str:
         return "mqtt"
     if item.name == LABEL_KAFKA:
         return "kafka"
+    if item.name == LABEL_GITLAB or "gitlab" in item.name.lower():
+        return "gitlab"
     return "other"
 
 
@@ -229,6 +244,10 @@ def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
 
 
 def _validate_connection_by_kind(kind: str, data: dict[str, Any], *, require_password: bool) -> None:
+    if kind == "gitlab":
+        if not str(data.get("url") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入仓库 URL")
+        return
     if kind == "other":
         if not str(data.get("url") or "").strip():
             raise HTTPException(status_code=400, detail="请输入 URL")
@@ -258,6 +277,32 @@ def _validate_connection_by_kind(kind: str, data: dict[str, Any], *, require_pas
 
 def _clear_connection_fields_for_kind(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     payload = dict(data)
+    if kind == "gitlab":
+        payload["port"] = None
+        payload["username"] = None
+        payload["password"] = None
+        payload["database_name"] = None
+        payload["mqtt_subscriptions"] = []
+        payload["mqtt_ws_path"] = None
+        cleaned_sub_links = []
+        for item in payload.get("sub_links") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            url = str(item.get("url") or "").strip()
+            clone_url = _optional_clone_url(item.get("clone_url"))
+            if name and url:
+                cleaned_sub_links.append(
+                    {
+                        "name": name,
+                        "url": url,
+                        "clone_url": clone_url or None,
+                        "is_reachable": item.get("is_reachable"),
+                        "last_checked_at": item.get("last_checked_at"),
+                    }
+                )
+        payload["sub_links"] = cleaned_sub_links
+        return payload
     if kind == "other":
         for key in ("host", "port", "username", "password", "database_name"):
             payload[key] = None
@@ -844,6 +889,8 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
 
         "database_name": payload.get("database_name", conn.database_name),
 
+        "sub_links": payload.get("sub_links", conn.sub_links or []),
+
     }
 
     merged = _normalize_connection_payload(merged)
@@ -855,7 +902,7 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
     _validate_connection_by_kind(kind, merged, require_password=require_password)
     normalized = _clear_connection_fields_for_kind(kind, merged)
 
-    for key in ("url", "host", "port", "username", "database_name"):
+    for key in ("url", "host", "port", "username", "database_name", "sub_links"):
         if key in normalized:
             payload[key] = normalized[key]
     if kind == "other":
@@ -1061,6 +1108,7 @@ def build_gitlab_subscription_links(
                 "link_key": "main",
                 "name": "主链接",
                 "url": main_url,
+                "clone_url": _optional_clone_url(conn.host),
                 "branch": main_parsed.branch if main_parsed else "-",
                 "repo_path": main_parsed.repo_path if main_parsed else "",
                 "enabled": bool(states.get("main", False)),
@@ -1083,6 +1131,7 @@ def build_gitlab_subscription_links(
                 "link_key": key,
                 "name": str(item.get("name") or f"子链接 {index + 1}").strip(),
                 "url": url,
+                "clone_url": _optional_clone_url(item.get("clone_url")),
                 "branch": parsed.branch,
                 "repo_path": parsed.repo_path,
                 "enabled": bool(states.get(key, False)),
@@ -1113,16 +1162,29 @@ def build_database_subscription_links(
     ]
 
 
+def _parse_commit_timestamp(value: str) -> datetime | None:
+    text = value.strip().replace(" UTC", "Z")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _utc_iso_z(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+
+
 def _activity_display_time(log: ActivityLog) -> datetime:
     payload = log.payload or {}
     if log.source_type == "gitlab":
         committed = payload.get("committed_at")
         if isinstance(committed, str) and committed.strip():
-            text = committed.strip().replace(" UTC", "Z")
-            try:
-                return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
-            except ValueError:
-                pass
+            parsed = _parse_commit_timestamp(committed)
+            if parsed is not None:
+                return parsed
     return log.occurred_at
 
 
@@ -1197,7 +1259,7 @@ def _attach_subscription_link_activity_times(
         conn_id = int(tree["connection_id"])
         for link in tree.get("links") or []:
             last_updated = _last_updated_for_subscription_link(conn_id, link, logs_by_connection)
-            link["last_updated_at"] = last_updated.isoformat() if last_updated else None
+            link["last_updated_at"] = _utc_iso_z(last_updated) if last_updated else None
 
 
 def list_gitlab_subscription_trees(
@@ -1250,7 +1312,30 @@ def list_gitlab_subscription_trees(
             }
         )
     _attach_subscription_link_activity_times(db, trees)
+    _attach_api_snapshot_meta(db, trees)
     return trees
+
+
+def _attach_api_snapshot_meta(db: Session, trees: list[dict[str, Any]]) -> None:
+    from app.models import ApiSnapshot
+
+    subscription_ids = [int(tree["id"]) for tree in trees if tree.get("id")]
+    if not subscription_ids:
+        return
+    rows = db.query(ApiSnapshot).filter(ApiSnapshot.subscription_id.in_(subscription_ids)).all()
+    by_sub: dict[int, dict[str, ApiSnapshot]] = {}
+    for row in rows:
+        by_sub.setdefault(row.subscription_id, {})[row.link_key] = row
+    for tree in trees:
+        snapshots = by_sub.get(int(tree["id"]), {})
+        for link in tree.get("links") or []:
+            snap = snapshots.get(str(link.get("link_key") or ""))
+            if not snap:
+                link["api_scan_status"] = None
+                link["api_endpoint_count"] = 0
+                continue
+            link["api_scan_status"] = snap.scan_status
+            link["api_endpoint_count"] = int((snap.spec or {}).get("endpoint_count") or 0) if snap.spec else 0
 
 
 def iter_enabled_gitlab_links(sub: Subscription, provider: str, event: str):
@@ -1485,7 +1570,7 @@ def list_activity_logs(
 
         query = query.filter(ActivityLog.source_type == source_type)
     else:
-        query = query.filter(ActivityLog.source_type.in_(["gitlab", "database"]))
+        query = query.filter(ActivityLog.source_type.in_(["gitlab", "database", "api-monitor"]))
 
     return query.order_by(ActivityLog.occurred_at.desc()).limit(limit).all()
 

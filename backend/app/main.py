@@ -98,7 +98,7 @@ def seed_dict_items(db) -> None:
         (DICT_ENVIRONMENT, "生产环境", None, 3),
         (DICT_LABEL, LABEL_OTHER, "普通跳转连接", 0, True),
         (DICT_LABEL, "GitHub 仓库", "GitHub 代码仓库", 1, False),
-        (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2, False),
+        (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2, True),
         (DICT_LABEL, LABEL_DATABASE, "数据库连接", 3, True),
         (DICT_LABEL, LABEL_TERMINAL, "SSH/终端模拟器连接", 4, True),
         (DICT_LABEL, LABEL_REDIS, "Redis 缓存连接", 5, True),
@@ -540,6 +540,9 @@ def seed_gitlab_label(db) -> None:
         .first()
     )
     if exists:
+        if not exists.is_system:
+            exists.is_system = True
+            db.commit()
         return
     db.add(
         DictItem(
@@ -547,6 +550,7 @@ def seed_gitlab_label(db) -> None:
             name="GitLab 仓库",
             description="GitLab 代码仓库",
             sort_order=3,
+            is_system=True,
         )
     )
     db.commit()

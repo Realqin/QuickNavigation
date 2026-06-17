@@ -127,9 +127,12 @@ services:
       REDISINSIGHT_INTERNAL_URL: http://redisinsight-app:5540
       REDISINSIGHT_PUBLIC_PORT: 5540
       REDISINSIGHT_REDIS_HOST: host.docker.internal
+      API_REPO_CACHE_DIR: /data/api-repos
     volumes:
       - omnidb_data:/omnidb-data
       - ./docker/redpanda/data:/config
+      - ./backend/app:/app/app
+      - ./data/api-repos:/data/api-repos
     depends_on:
       mysql:
         condition: service_healthy

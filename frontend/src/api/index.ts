@@ -482,3 +482,128 @@ export async function updateRepoAccessSettings(payload: {
   const { data } = await client.put<RepoAccessSettings>('/api/settings/repo-access', payload);
   return data;
 }
+
+export async function fetchApiMonitorFilterOptions(params?: {
+  project?: number;
+  environment?: number;
+}) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorFilterOptions>(
+    '/api/api-monitor/filter-options',
+    { params },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorServices(params?: {
+  project?: number;
+  environment?: number;
+  name?: string;
+}) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorService[]>(
+    '/api/api-monitor/services',
+    { params },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorModules(serviceId: string) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorModules>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/modules`,
+  );
+  return data;
+}
+
+export async function fetchApiMonitorGroups(serviceId: string, module?: string) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorGroups>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/groups`,
+    { params: module ? { module } : undefined },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorGroupEndpoints(
+  serviceId: string,
+  tag: string,
+  module?: string,
+) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorGroupEndpoints>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/groups/${encodeURIComponent(tag)}/endpoints`,
+    { params: module ? { module } : undefined },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorEndpoint(serviceId: string, endpointId: string) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorEndpoint>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/endpoints/${encodeURIComponent(endpointId)}`,
+  );
+  return data;
+}
+
+export async function fetchApiMonitorProxy(payload: {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: string;
+}) {
+  const { data } = await client.post<{
+    status_code: number;
+    headers: Record<string, string>;
+    body: string;
+    elapsed_ms: number;
+  }>('/api/api-monitor/proxy', payload, { timeout: 60000 });
+  return data;
+}
+
+export async function fetchApiMonitorSpec(serviceId: string, module?: string) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorSpec>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/spec`,
+    { params: module ? { module } : undefined, timeout: 120000 },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorScanRuns(serviceId: string, limit = 50) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorScanRun[]>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/scan-runs`,
+    { params: { limit } },
+  );
+  return data;
+}
+
+export async function fetchApiMonitorScanRunChanges(serviceId: string, scanRunId: number) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorScanRunChanges>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/scan-runs/${scanRunId}/changes`,
+  );
+  return data;
+}
+
+export async function fetchApiMonitorEndpointChanges(
+  serviceId: string,
+  endpointId: string,
+  limit = 50,
+) {
+  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorEndpointChange[]>(
+    `/api/api-monitor/services/${encodeURIComponent(serviceId)}/endpoints/${encodeURIComponent(endpointId)}/changes`,
+    { params: { limit } },
+  );
+  return data;
+}
+
+export async function syncSubscriptionApi(subscriptionId: number, linkKey?: string) {
+  const { data } = await client.post<{
+    subscription_id: number;
+    synced: number;
+    skipped: number;
+    failed: number;
+    message: string;
+  }>(
+    `/api/subscriptions/${subscriptionId}/api-sync`,
+    null,
+    {
+      params: linkKey ? { link_key: linkKey } : undefined,
+      timeout: 300000,
+    },
+  );
+  return data;
+}

@@ -124,6 +124,84 @@ class SchemaSnapshot(Base):
     )
 
 
+class ApiSnapshot(Base):
+    __tablename__ = "api_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    link_key: Mapped[str] = mapped_column(String(32), nullable=False, default="main")
+    spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    scan_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    scan_runs: Mapped[list["ApiScanRun"]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+
+
+class ApiScanRun(Base):
+    __tablename__ = "api_scan_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("api_snapshots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subscription_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    link_key: Mapped[str] = mapped_column(String(32), nullable=False, default="main", index=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    commit_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    branch: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_baseline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    endpoint_count_before: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    endpoint_count_after: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    added_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    modified_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    removed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    snapshot: Mapped["ApiSnapshot"] = relationship(back_populates="scan_runs")
+    endpoint_changes: Mapped[list["ApiEndpointChange"]] = relationship(
+        back_populates="scan_run", cascade="all, delete-orphan"
+    )
+
+
+class ApiEndpointChange(Base):
+    __tablename__ = "api_endpoint_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scan_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("api_scan_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subscription_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    link_key: Mapped[str] = mapped_column(String(32), nullable=False, default="main", index=True)
+    endpoint_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    change_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    tag: Mapped[str] = mapped_column(String(128), nullable=False, default="default")
+    summary: Mapped[str] = mapped_column(String(512), nullable=False)
+    before_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    diff_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_line: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    scan_run: Mapped["ApiScanRun"] = relationship(back_populates="endpoint_changes")
+
+
 class KafkaConsoleConnection(Base):
     """连接方式 → Kafka 菜单专用，与 connections 表互不影响。"""
 
