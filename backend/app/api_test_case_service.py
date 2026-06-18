@@ -299,19 +299,9 @@ def _normalize_generated_case_name(name: str, description: str = "") -> str:
     if not text:
         return "接口用例"
 
-    text = re.sub(r"[（(].*[）)]$", "", text).strip()
-    text = re.sub(r"^缺少必填字段", "缺", text)
-    text = re.sub(r"^缺少必填参数", "缺", text)
-    text = re.sub(r"^缺少必填", "缺", text)
-    text = re.sub(r"^缺少", "缺", text)
-    text = re.sub(r"^不携带", "无", text)
-    text = re.sub(r"^未携带", "无", text)
-    text = re.sub(r"^未带", "无", text)
-    text = re.sub(r"认证信息$", "Token", text)
-    text = re.sub(r"鉴权信息$", "Token", text)
     text = re.sub(r"\s+", " ", text)
 
-    max_len = 28
+    max_len = 48
     if len(text) > max_len:
         text = text[:max_len].rstrip("，,、 ") + "…"
 

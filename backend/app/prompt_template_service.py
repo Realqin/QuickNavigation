@@ -30,8 +30,12 @@ API_CASE_GENERATE_BASE_CONTENT = (
     "你是接口测试专家。根据提供的 HTTP 接口信息，生成一组可执行的冒烟与关键异常场景测试用例。"
     "至少覆盖：正常流程、必填字段校验（适用于 POST/PUT/PATCH）、鉴权校验（若接口需要认证）。"
     "用例 id 从 TC001 递增；apiUrl 使用接口实际路径；headers 中 Authorization 使用 Bearer ${token} 占位符。"
-    "【用例名称】必须简短明了，8~20 字为宜，只写测试要点，例如「正常查询」「缺 relevance」「未带 Token」。"
-    "不要在 name 中重复 description，不要写长句、不要加括号补充说明。"
+    "【用例名称 name】必须具体、可区分，12~36 字为宜，让读者不看 description 也能知道测什么。"
+    "命名建议采用「场景-关键条件-预期结果」结构，例如："
+    "「正常分页查询用户列表-返回200」「创建用户缺少username-返回400」「未携带Token访问-返回401」。"
+    "name 中应包含：被测动作或对象、关键参数/缺失项/异常条件、预期状态码或结果关键词（至少两项）。"
+    "禁止使用过于笼统的名称，如「正常流程」「冒烟测试」「接口测试」「成功场景」「失败场景」。"
+    "description 用于补充请求细节与断言说明，可与 name 相关但不要与 name 完全相同。"
     "【重要】只输出一个 JSON 对象，必须包含 testCases 数组；不要 Markdown 代码块，不要任何解释文字。"
 )
 
@@ -39,7 +43,7 @@ API_CASE_GENERATE_RESPONSE_FORMAT = """{
   "testCases": [
     {
       "id": "TC001",
-      "name": "正常获取用户列表",
+      "name": "正常分页查询用户列表-返回200",
       "apiUrl": "/api/v1/users",
       "method": "GET",
       "headers": {"Content-Type": "application/json", "Authorization": "Bearer ${token}"},
@@ -51,7 +55,7 @@ API_CASE_GENERATE_RESPONSE_FORMAT = """{
     },
     {
       "id": "TC002",
-      "name": "缺 username",
+      "name": "创建用户缺少username-返回400",
       "apiUrl": "/api/v1/users",
       "method": "POST",
       "headers": {"Content-Type": "application/json", "Authorization": "Bearer ${token}"},
@@ -63,7 +67,7 @@ API_CASE_GENERATE_RESPONSE_FORMAT = """{
     },
     {
       "id": "TC003",
-      "name": "无 Token",
+      "name": "未携带Token访问用户列表-返回401",
       "apiUrl": "/api/v1/users",
       "method": "GET",
       "headers": {"Content-Type": "application/json"},
@@ -187,30 +191,6 @@ def create_prompt_template(db: Session, payload: dict) -> dict:
     db.add(prompt)
     if prompt.is_default:
         _unset_defaults(db, prompt.prompt_type, prompt.id)
-    db.commit()
-
-
-def sync_api_case_generate_prompt(db: Session) -> None:
-    """同步预制「接口冒烟用例生成」提示词的返回格式（已有库也能更新）。"""
-    prompt = (
-        db.query(PromptTemplate)
-        .filter(PromptTemplate.remark == "api-case-generate", PromptTemplate.is_preset.is_(True))
-        .first()
-    )
-    if not prompt:
-        return
-
-    extra = dict(prompt.extra_data or {})
-    extra["base_content"] = API_CASE_GENERATE_BASE_CONTENT
-    extra["response_type"] = "json-object"
-    extra["response_format"] = API_CASE_GENERATE_RESPONSE_FORMAT
-    prompt.content = _compose_prompt_content(
-        API_CASE_GENERATE_BASE_CONTENT,
-        "json-object",
-        API_CASE_GENERATE_RESPONSE_FORMAT,
-    )
-    prompt.extra_data = extra
-    prompt.updated_at = datetime.utcnow()
     db.commit()
 
 
@@ -355,7 +335,7 @@ def seed_prompt_templates(db: Session) -> None:
         {
             "prompt_type": "接口用例",
             "name": "接口冒烟用例生成",
-            "description": "根据接口文档生成基础冒烟测试用例。",
+            "description": "根据接口文档生成基础冒烟测试用例，用例名称需包含场景、条件与预期。",
             "base_content": API_CASE_GENERATE_BASE_CONTENT,
             "response_type": "json-object",
             "response_format": API_CASE_GENERATE_RESPONSE_FORMAT,
