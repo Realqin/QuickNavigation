@@ -750,6 +750,7 @@ class ApiMonitorGroupsOut(BaseModel):
     project_display: str = ""
     environment_display: str = ""
     groups: list[ApiMonitorGroupSummaryOut] = Field(default_factory=list)
+    removed_endpoint_keys: list[str] = Field(default_factory=list)
 
 
 class ApiMonitorEndpointSummaryOut(BaseModel):
@@ -833,6 +834,7 @@ class ApiTestCaseCreate(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     api_path: str = Field(min_length=1, max_length=512)
     method: str = Field(min_length=1, max_length=16)
+    request_headers: str | None = None
     request_params: str | None = None
     request_body: str | None = None
     expected_status: int = Field(default=200, ge=100, le=599)
@@ -848,6 +850,7 @@ class ApiTestCaseUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=256)
     api_path: str | None = Field(default=None, min_length=1, max_length=512)
     method: str | None = Field(default=None, min_length=1, max_length=16)
+    request_headers: str | None = None
     request_params: str | None = None
     request_body: str | None = None
     expected_status: int | None = Field(default=None, ge=100, le=599)
@@ -866,6 +869,7 @@ class ApiTestCaseOut(BaseModel):
     name: str
     api_path: str
     method: str
+    request_headers: str | None = None
     request_params: str | None = None
     request_body: str | None = None
     expected_status: int
@@ -896,8 +900,134 @@ class ApiTestCaseGenerateIn(BaseModel):
     parameters: list[dict[str, Any]] = Field(default_factory=list)
     expected_status: int = Field(default=200, ge=100, le=599)
     expected_response: str | None = None
+    overwrite: bool = False
 
 
 class ApiTestCaseGenerateOut(BaseModel):
     items: list[ApiTestCaseOut] = Field(default_factory=list)
     created: int = 0
+    overwritten: int = 0
+
+
+class ApiTestCaseBatchDeleteOut(BaseModel):
+    soft_deleted: int = 0
+    hard_deleted: int = 0
+    not_found: int = 0
+    total: int = 0
+
+
+class AiAnalysisIn(BaseModel):
+    log_id: int | None = None
+    scenario: str = "generic"
+    title: str = ""
+    summary: str = ""
+    context: str = ""
+    content: str = ""
+    content_label: str = "变更内容"
+    prompt_type: str = "AI分析"
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiAnalysisOut(BaseModel):
+    analysis: str
+    model: str = ""
+    prompt_type: str = "AI分析"
+    prompt_name: str = ""
+    scenario: str = ""
+    truncated: bool = False
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class LlmConfigCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    api_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(min_length=1, max_length=500)
+    model_name: str = Field(min_length=1, max_length=100)
+    context_limit: int = Field(default=128000, ge=1)
+    vision_enabled: bool = False
+    stream_enabled: bool = True
+    enabled: bool = False
+
+
+class LlmConfigUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    api_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default="", max_length=500)
+    model_name: str = Field(min_length=1, max_length=100)
+    context_limit: int = Field(default=128000, ge=1)
+    vision_enabled: bool = False
+    stream_enabled: bool = True
+    enabled: bool = False
+
+
+class LlmConfigOut(BaseModel):
+    id: str
+    name: str
+    api_url: str
+    api_key: str = ""
+    has_api_key: bool = False
+    model_name: str
+    context_limit: int
+    vision_enabled: bool
+    stream_enabled: bool
+    enabled: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class LlmToggleIn(BaseModel):
+    enabled: bool
+
+
+class LlmConnectionTestIn(BaseModel):
+    api_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default="", max_length=500)
+    model_name: str = Field(min_length=1, max_length=100)
+    config_id: str | None = None
+
+
+class LlmModelsFetchIn(BaseModel):
+    api_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default="", max_length=500)
+    config_id: str | None = None
+
+
+class LlmModelsOut(BaseModel):
+    items: list[str] = Field(default_factory=list)
+
+
+class LlmConnectionTestOut(BaseModel):
+    ok: bool
+    message: str
+    model: str | None = None
+
+
+class PromptTemplateIn(BaseModel):
+    prompt_type: str = Field(min_length=1, max_length=50)
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    content: str = Field(default="", max_length=20000)
+    base_content: str = Field(default="", max_length=10000)
+    response_type: str = Field(default="", max_length=100)
+    response_format: str = Field(default="", max_length=10000)
+    remark: str = Field(default="", max_length=200)
+    enabled: bool = True
+    is_default: bool = False
+    is_preset: bool = False
+
+
+class PromptTemplateOut(BaseModel):
+    id: str
+    prompt_type: str
+    name: str
+    description: str = ""
+    content: str = ""
+    base_content: str = ""
+    response_type: str = ""
+    response_format: str = ""
+    remark: str = ""
+    enabled: bool = True
+    is_default: bool = False
+    is_preset: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

@@ -649,6 +649,49 @@ def seed_connection_groups(db) -> None:
         db.commit()
 
 
+def migrate_api_test_case_request_headers() -> None:
+    import json
+
+    from app.models import ApiTestCase
+
+    inspector = inspect(engine)
+    if not inspector.has_table("api_test_cases"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("api_test_cases")}
+    with engine.begin() as conn:
+        if "request_headers" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN request_headers TEXT NULL"))
+
+    db = SessionLocal()
+    try:
+        changed = False
+        for case in db.query(ApiTestCase).all():
+            if case.request_headers:
+                continue
+            raw = (case.request_params or "").strip()
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict) or "headers" not in parsed:
+                continue
+            headers = parsed.get("headers")
+            if not isinstance(headers, dict):
+                continue
+            case.request_headers = json.dumps(headers, ensure_ascii=False, indent=2)
+            parsed.pop("headers", None)
+            case.request_params = (
+                json.dumps(parsed, ensure_ascii=False, indent=2) if parsed else None
+            )
+            changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
+
+
 def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
@@ -670,6 +713,7 @@ def init_db() -> None:
     migrate_kafka_console_connections()
     migrate_mqtt_console_connections()
     migrate_mqtt_console_subscriptions()
+    migrate_api_test_case_request_headers()
     db = SessionLocal()
     try:
         seed_dict_items(db)
@@ -677,6 +721,17 @@ def init_db() -> None:
         seed_gitlab_label(db)
         seed_connection_groups(db)
         seed_connections(db)
+        from app.llm_config_service import seed_llm_configs
+        from app.prompt_template_service import seed_prompt_templates
+
+        seed_llm_configs(db)
+        seed_prompt_templates(db)
+        from app.prompt_template_service import sync_api_case_generate_prompt
+
+        sync_api_case_generate_prompt(db)
+        from app.prompt_template_service import ensure_general_ai_analysis_prompt
+
+        ensure_general_ai_analysis_prompt(db)
         from app.repo_access_service import sync_repo_access_cache_from_db
 
         sync_repo_access_cache_from_db(db)

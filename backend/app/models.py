@@ -214,6 +214,7 @@ class ApiTestCase(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     api_path: Mapped[str] = mapped_column(String(512), nullable=False)
     method: Mapped[str] = mapped_column(String(16), nullable=False, default="GET")
+    request_headers: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_params: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_status: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
@@ -292,6 +293,43 @@ class RepoAccessSettings(Base):
     gitlab_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     github_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     public_webhook_base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class LlmConfig(Base):
+    __tablename__ = "llm_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    api_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_key: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    context_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=128000)
+    vision_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stream_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class PromptTemplate(Base):
+    __tablename__ = "prompt_templates"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    prompt_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    remark: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    is_preset: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

@@ -12,6 +12,8 @@ export type PageType =
   | 'dict'
   | 'apiMonitor'
   | 'apiCases'
+  | 'llmConfigs'
+  | 'prompts'
   | ConnectionMethodType;
 
 export interface AppTab {
@@ -27,6 +29,8 @@ export const PAGE_LABELS: Record<PageType, string> = {
   dict: '字典管理',
   apiMonitor: '接口监听',
   apiCases: '接口用例',
+  llmConfigs: 'LLM配置',
+  prompts: '提示词管理',
   methodDatabase: '数据库',
   methodTerminal: 'Linux 终端',
   methodRedis: 'Redis',
@@ -35,6 +39,10 @@ export const PAGE_LABELS: Record<PageType, string> = {
 };
 
 export const CONNECTION_METHOD_MENU_KEY = 'connectionMethods';
+
+export const CONFIG_MENU_KEY = 'configManagement';
+
+export const CONFIG_PAGE_TYPES: PageType[] = ['llmConfigs', 'prompts', 'dict'];
 
 export const CONNECTION_METHOD_TYPES: ConnectionMethodType[] = [
   'methodDatabase',
@@ -46,6 +54,10 @@ export const CONNECTION_METHOD_TYPES: ConnectionMethodType[] = [
 
 export function isConnectionMethodType(type: PageType): type is ConnectionMethodType {
   return CONNECTION_METHOD_TYPES.includes(type as ConnectionMethodType);
+}
+
+export function isConfigPageType(type: PageType): boolean {
+  return CONFIG_PAGE_TYPES.includes(type);
 }
 
 export function createTab(type: PageType): AppTab {

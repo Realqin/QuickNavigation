@@ -655,6 +655,20 @@ export async function deleteApiTestCase(id: number) {
   await client.delete(`/api/api-test-cases/${id}`);
 }
 
+export async function permanentDeleteApiTestCase(id: number) {
+  await client.delete(`/api/api-test-cases/${id}/permanent`);
+}
+
+export async function batchDeleteApiTestCases(ids: number[]) {
+  const { data } = await client.post<{
+    soft_deleted: number;
+    hard_deleted: number;
+    not_found: number;
+    total: number;
+  }>('/api/api-test-cases/batch-delete', { ids });
+  return data;
+}
+
 export async function restoreApiTestCase(id: number) {
   const { data } = await client.post<import('../types/apiTestCase').ApiTestCase>(
     `/api/api-test-cases/${id}/restore`,
@@ -673,10 +687,102 @@ export async function generateApiTestCasesFromEndpoint(payload: {
   parameters?: import('../types/apiMonitor').ApiMonitorParameter[];
   expected_status?: number;
   expected_response?: string;
+  overwrite?: boolean;
 }) {
   const { data } = await client.post<{
     items: import('../types/apiTestCase').ApiTestCase[];
     created: number;
-  }>('/api/api-test-cases/generate-from-endpoint', payload);
+    overwritten?: number;
+  }>('/api/api-test-cases/generate-from-endpoint', payload, { timeout: 180000 });
   return data;
+}
+
+export async function fetchAiAnalysis(payload: {
+  log_id?: number;
+  scenario?: string;
+  title?: string;
+  summary?: string;
+  context?: string;
+  content?: string;
+  content_label?: string;
+  prompt_type?: string;
+  extra?: Record<string, unknown>;
+}) {
+  const { data } = await client.post<import('../types/aiAnalysis').AiAnalysisResult>(
+    '/api/ai-analysis',
+    payload,
+    { timeout: 180000 },
+  );
+  return data;
+}
+
+export async function fetchLlmConfigs() {
+  const { data } = await client.get<import('../types/llm').LlmConfig[]>('/api/llm-configs');
+  return data;
+}
+
+export async function createLlmConfig(payload: import('../types/llm').LlmConfigFormValues) {
+  const { data } = await client.post<import('../types/llm').LlmConfig>('/api/llm-configs', payload);
+  return data;
+}
+
+export async function updateLlmConfig(id: string, payload: import('../types/llm').LlmConfigFormValues) {
+  const { data } = await client.put<import('../types/llm').LlmConfig>(`/api/llm-configs/${id}`, payload);
+  return data;
+}
+
+export async function toggleLlmConfig(id: string, enabled: boolean) {
+  const { data } = await client.post<import('../types/llm').LlmConfig>(`/api/llm-configs/${id}/toggle`, {
+    enabled,
+  });
+  return data;
+}
+
+export async function deleteLlmConfig(id: string) {
+  await client.delete(`/api/llm-configs/${id}`);
+}
+
+export async function testLlmConnection(payload: import('../types/llm').LlmConnectionTestPayload) {
+  const { data } = await client.post<{ ok: boolean; message: string; model?: string }>(
+    '/api/llm-configs/test-connection',
+    payload,
+    { timeout: 45000 },
+  );
+  return data;
+}
+
+export async function fetchLlmModels(payload: import('../types/llm').LlmModelsPayload) {
+  const { data } = await client.post<{ items: string[] }>('/api/llm-configs/models', payload, {
+    timeout: 90000,
+  });
+  return data;
+}
+
+export async function fetchPromptTemplates() {
+  const { data } = await client.get<import('../types/prompt').PromptTemplate[]>('/api/prompts');
+  return data;
+}
+
+export async function createPromptTemplate(payload: import('../types/prompt').PromptTemplateFormValues) {
+  const { data } = await client.post<import('../types/prompt').PromptTemplate>('/api/prompts', payload);
+  return data;
+}
+
+export async function updatePromptTemplate(
+  id: string,
+  payload: import('../types/prompt').PromptTemplateFormValues,
+) {
+  const { data } = await client.put<import('../types/prompt').PromptTemplate>(`/api/prompts/${id}`, payload);
+  return data;
+}
+
+export async function togglePromptTemplate(id: string, enabled: boolean) {
+  const { data } = await client.post<import('../types/prompt').PromptTemplate>(`/api/prompts/${id}/toggle`, {
+    enabled,
+  });
+  return data;
+}
+
+export async function deletePromptTemplate(id: string) {
+  await client.delete(`/api/prompts/${id}`);
 }

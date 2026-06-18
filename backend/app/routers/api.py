@@ -22,12 +22,25 @@ from app.schemas import (
     ApiMonitorServiceOut,
     ApiMonitorSpecOut,
     ApiMonitorSyncResultOut,
+    AiAnalysisIn,
+    AiAnalysisOut,
     ApiTestCaseCreate,
+    ApiTestCaseBatchDeleteOut,
     ApiTestCaseGenerateIn,
     ApiTestCaseGenerateOut,
     ApiTestCaseListOut,
     ApiTestCaseOut,
     ApiTestCaseUpdate,
+    LlmConfigCreate,
+    LlmConfigOut,
+    LlmConfigUpdate,
+    LlmConnectionTestIn,
+    LlmConnectionTestOut,
+    LlmModelsFetchIn,
+    LlmModelsOut,
+    LlmToggleIn,
+    PromptTemplateIn,
+    PromptTemplateOut,
     ActivityLogDiffOut,
     ActivityLogOut,
     BatchDeleteRequest,
@@ -1064,6 +1077,16 @@ def update_api_test_case(case_id: int, payload: ApiTestCaseUpdate, db: Session =
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/api-test-cases/batch-delete", response_model=ApiTestCaseBatchDeleteOut)
+def batch_delete_api_test_cases(payload: BatchDeleteRequest, db: Session = Depends(get_db)):
+    from app.api_test_case_service import batch_delete_api_test_cases as remove_api_test_cases
+
+    try:
+        return ApiTestCaseBatchDeleteOut(**remove_api_test_cases(db, payload.ids))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.delete("/api-test-cases/{case_id}", status_code=204)
 def delete_api_test_case(case_id: int, db: Session = Depends(get_db)):
     from app.api_test_case_service import soft_delete_api_test_case
@@ -1074,15 +1097,26 @@ def delete_api_test_case(case_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.delete("/api-test-cases/{case_id}/permanent", status_code=204)
+def permanent_delete_api_test_case(case_id: int, db: Session = Depends(get_db)):
+    from app.api_test_case_service import hard_delete_api_test_case
+
+    try:
+        hard_delete_api_test_case(db, case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/api-test-cases/generate-from-endpoint", response_model=ApiTestCaseGenerateOut)
-def generate_api_test_cases(payload: ApiTestCaseGenerateIn, db: Session = Depends(get_db)):
+async def generate_api_test_cases(payload: ApiTestCaseGenerateIn, db: Session = Depends(get_db)):
     from app.api_test_case_service import generate_api_test_cases_from_endpoint
 
     try:
-        result = generate_api_test_cases_from_endpoint(db, payload.model_dump())
+        result = await generate_api_test_cases_from_endpoint(db, payload.model_dump())
         return ApiTestCaseGenerateOut(
             items=[ApiTestCaseOut(**item) for item in result["items"]],
             created=result.get("created", 0),
+            overwritten=result.get("overwritten", 0),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1096,3 +1130,97 @@ def restore_api_test_case(case_id: int, db: Session = Depends(get_db)):
         return ApiTestCaseOut(**restore_case(db, case_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/llm-configs", response_model=list[LlmConfigOut])
+def list_llm_configs_api(db: Session = Depends(get_db)):
+    from app.llm_config_service import list_llm_configs
+
+    return [LlmConfigOut(**item) for item in list_llm_configs(db)]
+
+
+@router.post("/llm-configs", response_model=LlmConfigOut, status_code=201)
+def create_llm_config_api(payload: LlmConfigCreate, db: Session = Depends(get_db)):
+    from app.llm_config_service import create_llm_config
+
+    return LlmConfigOut(**create_llm_config(db, payload.model_dump()))
+
+
+@router.put("/llm-configs/{config_id}", response_model=LlmConfigOut)
+def update_llm_config_api(config_id: str, payload: LlmConfigUpdate, db: Session = Depends(get_db)):
+    from app.llm_config_service import update_llm_config
+
+    return LlmConfigOut(**update_llm_config(db, config_id, payload.model_dump()))
+
+
+@router.post("/llm-configs/{config_id}/toggle", response_model=LlmConfigOut)
+def toggle_llm_config_api(config_id: str, payload: LlmToggleIn, db: Session = Depends(get_db)):
+    from app.llm_config_service import toggle_llm_config
+
+    return LlmConfigOut(**toggle_llm_config(db, config_id, payload.enabled))
+
+
+@router.delete("/llm-configs/{config_id}", status_code=204)
+def delete_llm_config_api(config_id: str, db: Session = Depends(get_db)):
+    from app.llm_config_service import delete_llm_config
+
+    delete_llm_config(db, config_id)
+
+
+@router.post("/llm-configs/test-connection", response_model=LlmConnectionTestOut)
+async def test_llm_connection_api(payload: LlmConnectionTestIn, db: Session = Depends(get_db)):
+    from app.llm_config_service import test_llm_connection
+
+    return LlmConnectionTestOut(**await test_llm_connection(db, payload.model_dump()))
+
+
+@router.post("/llm-configs/models", response_model=LlmModelsOut)
+async def fetch_llm_models_api(payload: LlmModelsFetchIn, db: Session = Depends(get_db)):
+    from app.llm_config_service import fetch_llm_models
+
+    return LlmModelsOut(**await fetch_llm_models(db, payload.model_dump()))
+
+
+@router.post("/ai-analysis", response_model=AiAnalysisOut)
+async def post_ai_analysis(payload: AiAnalysisIn, db: Session = Depends(get_db)):
+    from app.ai_analysis_service import run_ai_analysis
+
+    try:
+        return AiAnalysisOut(**await run_ai_analysis(db, payload.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/prompts", response_model=list[PromptTemplateOut])
+def list_prompts_api(db: Session = Depends(get_db)):
+    from app.prompt_template_service import list_prompt_templates
+
+    return [PromptTemplateOut(**item) for item in list_prompt_templates(db)]
+
+
+@router.post("/prompts", response_model=PromptTemplateOut, status_code=201)
+def create_prompt_api(payload: PromptTemplateIn, db: Session = Depends(get_db)):
+    from app.prompt_template_service import create_prompt_template
+
+    return PromptTemplateOut(**create_prompt_template(db, payload.model_dump()))
+
+
+@router.put("/prompts/{prompt_id}", response_model=PromptTemplateOut)
+def update_prompt_api(prompt_id: str, payload: PromptTemplateIn, db: Session = Depends(get_db)):
+    from app.prompt_template_service import update_prompt_template
+
+    return PromptTemplateOut(**update_prompt_template(db, prompt_id, payload.model_dump()))
+
+
+@router.post("/prompts/{prompt_id}/toggle", response_model=PromptTemplateOut)
+def toggle_prompt_api(prompt_id: str, payload: LlmToggleIn, db: Session = Depends(get_db)):
+    from app.prompt_template_service import toggle_prompt_template
+
+    return PromptTemplateOut(**toggle_prompt_template(db, prompt_id, payload.enabled))
+
+
+@router.delete("/prompts/{prompt_id}", status_code=204)
+def delete_prompt_api(prompt_id: str, db: Session = Depends(get_db)):
+    from app.prompt_template_service import delete_prompt_template
+
+    delete_prompt_template(db, prompt_id)

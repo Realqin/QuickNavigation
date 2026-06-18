@@ -10,6 +10,9 @@ import {
   LinkOutlined,
   MessageOutlined,
   RadarChartOutlined,
+  RobotOutlined,
+  FileTextOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Layout, Menu, Tabs, Typography } from 'antd';
@@ -24,9 +27,13 @@ import HomePage from '../pages/HomePage';
 import LogsPage from '../pages/LogsPage';
 import ApiMonitorPage from '../pages/ApiMonitorPage';
 import ApiCasePage from '../pages/ApiCasePage';
+import LlmConfigPage from '../pages/LlmConfigPage';
+import PromptManagePage from '../pages/PromptManagePage';
 import {
   CONNECTION_METHOD_MENU_KEY,
+  CONFIG_MENU_KEY,
   createTab,
+  isConfigPageType,
   isConnectionMethodType,
   PAGE_LABELS,
   type AppTab,
@@ -53,7 +60,16 @@ const MENU_ITEMS: MenuProps['items'] = [
   { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
   { key: 'apiMonitor', icon: <RadarChartOutlined />, label: PAGE_LABELS.apiMonitor },
   { key: 'apiCases', icon: <ExperimentOutlined />, label: PAGE_LABELS.apiCases },
-  { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
+  {
+    key: CONFIG_MENU_KEY,
+    icon: <SettingOutlined />,
+    label: '配置管理',
+    children: [
+      { key: 'llmConfigs', icon: <RobotOutlined />, label: PAGE_LABELS.llmConfigs },
+      { key: 'prompts', icon: <FileTextOutlined />, label: PAGE_LABELS.prompts },
+      { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
+    ],
+  },
 ];
 
 function renderTabContent(tab: AppTab) {
@@ -68,6 +84,10 @@ function renderTabContent(tab: AppTab) {
       return <ApiMonitorPage />;
     case 'apiCases':
       return <ApiCasePage />;
+    case 'llmConfigs':
+      return <LlmConfigPage />;
+    case 'prompts':
+      return <PromptManagePage />;
     case 'dict':
       return <DictPage />;
     case 'methodDatabase':
@@ -115,6 +135,11 @@ export default function MainLayout() {
     if (isConnectionMethodType(type)) {
       setMenuOpenKeys((prev) =>
         prev.includes(CONNECTION_METHOD_MENU_KEY) ? prev : [...prev, CONNECTION_METHOD_MENU_KEY],
+      );
+    }
+    if (isConfigPageType(type)) {
+      setMenuOpenKeys((prev) =>
+        prev.includes(CONFIG_MENU_KEY) ? prev : [...prev, CONFIG_MENU_KEY],
       );
     }
   }, []);
@@ -180,7 +205,7 @@ export default function MainLayout() {
             onOpenChange={setMenuOpenKeys}
             items={MENU_ITEMS}
             onClick={({ key }) => {
-              if (key === CONNECTION_METHOD_MENU_KEY) return;
+              if (key === CONNECTION_METHOD_MENU_KEY || key === CONFIG_MENU_KEY) return;
               openTab(key as PageType);
             }}
           />
@@ -200,7 +225,7 @@ export default function MainLayout() {
                 }
               }}
               items={tabItems}
-              destroyInactiveTabPane
+              destroyOnHidden
             />
           </Content>
         </Layout>

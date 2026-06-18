@@ -1869,15 +1869,24 @@ html:has(.embedded-console-page--standalone) body {
 
 
 .api-monitor-page__sidebar-expand {
+  width: 56px;
+  height: 44px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  background: #f1f5f9;
+}
 
-  position: absolute;
-
-  top: 10px;
-
-  left: 8px;
-
-  z-index: 2;
-
+.api-monitor-page__sidebar-expand:hover {
+  color: #1677ff !important;
+  background: #e8f1ff !important;
 }
 
 
@@ -2072,14 +2081,17 @@ html:has(.embedded-console-page--standalone) body {
 
   position: relative;
 
-  padding-left: 56px;
+  padding-left: 0;
 
   background: #fff;
 
 }
 
+.api-monitor-page__main--with-rail {
+  padding-left: 56px;
+}
 
-
+.api-monitor-page__main-rail,
 .api-monitor-page__main-tabs {
 
   display: flex;
@@ -2391,9 +2403,27 @@ html:has(.embedded-console-page--standalone) body {
 
 
 
+.api-monitor-cases__table-wrap {
+
+  width: 100%;
+
+  min-width: 0;
+
+}
+
+
+
 .api-monitor-cases__table {
 
   margin-top: 0;
+
+}
+
+
+
+.api-monitor-cases__table .ant-table {
+
+  width: 100%;
 
 }
 
@@ -2412,29 +2442,67 @@ html:has(.embedded-console-page--standalone) body {
 
 
 .api-monitor-cases__execute-body {
-
-  margin: 0;
-
-  padding: 12px;
-
-  max-height: 360px;
-
+  max-height: 420px;
   overflow: auto;
-
-  background: #f6f8fa;
-
+  margin: 0;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
   border: 1px solid #e5e7eb;
-
-  border-radius: 6px;
-
-  font-size: 12px;
-
-  line-height: 1.5;
-
+  background: #f6f8fa;
   white-space: pre-wrap;
-
   word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+}
 
+.api-monitor-cases__outcome-tooltip-overlay .ant-tooltip-inner {
+  width: min(520px, 72vw);
+  max-width: min(520px, 72vw);
+  padding: 10px 12px;
+}
+
+.api-monitor-cases__outcome-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.api-monitor-cases__outcome-tooltip-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.api-monitor-cases__outcome-tooltip-label {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.api-monitor-cases__outcome-tooltip-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.api-monitor-cases__outcome-tooltip-body {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #fff;
+}
+
+.api-monitor-cases__outcome-tooltip-note {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 
@@ -2740,5 +2808,41 @@ html:has(.embedded-console-page--standalone) body {
   padding: 24px 12px;
   text-align: center;
   font-size: 13px;
+}
+
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0 16px;
+}
+
+.admin-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-page__title {
+  margin: 0 !important;
+}
+
+.admin-form-modal .ant-form-item {
+  margin-bottom: 10px;
+}
+
+.admin-form-modal .ant-form-item-label > label {
+  height: 28px;
+  font-size: 13px;
+}
+
+.prompt-manage-table .ant-table {
+  table-layout: fixed;
+}
+
+.prompt-manage-table .ant-table-cell {
+  overflow: hidden;
 }
 
