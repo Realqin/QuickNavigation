@@ -165,7 +165,7 @@ export default function DictPage() {
           setEditing(null);
         }}
         onOk={handleSubmit}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="type" hidden>

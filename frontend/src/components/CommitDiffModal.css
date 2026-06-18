@@ -1,0 +1,106 @@
+.commit-diff-modal .commit-diff-meta {
+  margin-bottom: 12px;
+}
+
+.commit-diff-scroll {
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.commit-diff-file + .commit-diff-file {
+  border-top: 1px solid #e8e8e8;
+}
+
+.commit-diff-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.commit-diff-file-path {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #262626;
+  background: #f0f0f0;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.commit-diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #fff;
+}
+
+.commit-diff-column-title {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #595959;
+}
+
+.commit-diff-column-title + .commit-diff-column-title {
+  border-left: 1px solid #e8e8e8;
+}
+
+.commit-diff-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: min-content;
+}
+
+.commit-diff-cell {
+  padding: 2px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+  min-height: 20px;
+}
+
+.commit-diff-cell + .commit-diff-cell {
+  border-left: 1px solid #f0f0f0;
+}
+
+.commit-diff-cell--context {
+  background: #fff;
+  color: #262626;
+}
+
+.commit-diff-cell--delete {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.commit-diff-cell--add {
+  background: #e6ffec;
+  color: #1a7f37;
+}
+
+.commit-diff-cell--empty {
+  background: #f6f8fa;
+}
+
+.commit-diff-binary {
+  padding: 12px;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.commit-diff-empty {
+  padding: 24px;
+  text-align: center;
+  color: #8c8c8c;
+}
+
+.commit-diff-footer {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+  text-align: right;
+}

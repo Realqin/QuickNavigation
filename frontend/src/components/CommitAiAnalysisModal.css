@@ -1,0 +1,191 @@
+.commit-ai-analysis-modal__summary,
+.commit-ai-analysis-modal__meta {
+  margin-bottom: 8px !important;
+}
+
+.commit-ai-analysis-modal__loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.commit-ai-analysis-modal__body {
+  max-height: min(68vh, 720px);
+  overflow: auto;
+  padding: 16px 20px;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 14px;
+  line-height: 1.75;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.commit-ai-analysis-modal__body.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.commit-ai-analysis-modal__body.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.commit-ai-analysis-modal__body.markdown-body h1,
+.commit-ai-analysis-modal__body.markdown-body h2,
+.commit-ai-analysis-modal__body.markdown-body h3,
+.commit-ai-analysis-modal__body.markdown-body h4 {
+  margin: 1.2em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.commit-ai-analysis-modal__body.markdown-body h1 {
+  font-size: 1.35em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body h2 {
+  font-size: 1.2em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid rgba(5, 5, 5, 0.08);
+}
+
+.commit-ai-analysis-modal__body.markdown-body h3 {
+  font-size: 1.05em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body p {
+  margin: 0.65em 0;
+}
+
+.commit-ai-analysis-modal__body.markdown-body ul,
+.commit-ai-analysis-modal__body.markdown-body ol {
+  margin: 0.65em 0;
+  padding-left: 1.5em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body li {
+  margin: 0.35em 0;
+}
+
+.commit-ai-analysis-modal__body.markdown-body li > p {
+  margin: 0.2em 0;
+}
+
+.commit-ai-analysis-modal__body.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 0.9em;
+  border-left: 3px solid #1677ff;
+  background: rgba(22, 119, 255, 0.06);
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.commit-ai-analysis-modal__body.markdown-body code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.92em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body pre {
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  overflow: auto;
+}
+
+.commit-ai-analysis-modal__body.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 0.9em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body table {
+  width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.commit-ai-analysis-modal__body.markdown-body th,
+.commit-ai-analysis-modal__body.markdown-body td {
+  padding: 8px 10px;
+  border: 1px solid rgba(5, 5, 5, 0.1);
+  text-align: left;
+}
+
+.commit-ai-analysis-modal__body.markdown-body th {
+  background: rgba(0, 0, 0, 0.03);
+  font-weight: 600;
+}
+
+.commit-ai-analysis-modal__body.markdown-body hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid rgba(5, 5, 5, 0.08);
+}
+
+.commit-ai-analysis-modal__body.markdown-body strong {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.commit-ai-analysis-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body,
+.dark .commit-ai-analysis-modal__body {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h1,
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h2,
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h3,
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h4,
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body strong,
+.dark .commit-ai-analysis-modal__body.markdown-body h1,
+.dark .commit-ai-analysis-modal__body.markdown-body h2,
+.dark .commit-ai-analysis-modal__body.markdown-body h3,
+.dark .commit-ai-analysis-modal__body.markdown-body h4,
+.dark .commit-ai-analysis-modal__body.markdown-body strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h2,
+.dark .commit-ai-analysis-modal__body.markdown-body h2 {
+  border-bottom-color: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body code,
+.dark .commit-ai-analysis-modal__body.markdown-body code {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body pre,
+.dark .commit-ai-analysis-modal__body.markdown-body pre {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body blockquote,
+.dark .commit-ai-analysis-modal__body.markdown-body blockquote {
+  background: rgba(22, 119, 255, 0.12);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body th,
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body td,
+.dark .commit-ai-analysis-modal__body.markdown-body th,
+.dark .commit-ai-analysis-modal__body.markdown-body td {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body th,
+.dark .commit-ai-analysis-modal__body.markdown-body th {
+  background: rgba(255, 255, 255, 0.06);
+}

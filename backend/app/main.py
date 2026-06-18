@@ -649,6 +649,41 @@ def seed_connection_groups(db) -> None:
         db.commit()
 
 
+def migrate_api_test_case_response_assert() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("api_test_cases"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("api_test_cases")}
+    with engine.begin() as conn:
+        if "response_assert_mode" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE api_test_cases ADD COLUMN response_assert_mode "
+                    "VARCHAR(16) NOT NULL DEFAULT 'text'"
+                )
+            )
+        if "response_assert_rules" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN response_assert_rules TEXT NULL"))
+
+
+def migrate_api_test_case_execution_result() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("api_test_cases"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("api_test_cases")}
+    with engine.begin() as conn:
+        if "last_exec_pass" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN last_exec_pass BOOLEAN NULL"))
+        if "last_exec_status_code" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN last_exec_status_code INT NULL"))
+        if "last_exec_response" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN last_exec_response TEXT NULL"))
+        if "last_exec_detail" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN last_exec_detail TEXT NULL"))
+        if "last_exec_at" not in cols:
+            conn.execute(text("ALTER TABLE api_test_cases ADD COLUMN last_exec_at DATETIME NULL"))
+
+
 def migrate_api_test_case_request_headers() -> None:
     import json
 
@@ -713,6 +748,8 @@ def init_db() -> None:
     migrate_kafka_console_connections()
     migrate_mqtt_console_connections()
     migrate_mqtt_console_subscriptions()
+    migrate_api_test_case_response_assert()
+    migrate_api_test_case_execution_result()
     migrate_api_test_case_request_headers()
     db = SessionLocal()
     try:

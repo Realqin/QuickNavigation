@@ -11,7 +11,7 @@ export {
 
 export function dictToOptions(items: DictItem[]) {
   return items.map((item) => ({
-    label: item.description ? `${item.name}（${item.description}）` : item.name,
+    label: item.description ? `${item.name} (${item.description})` : item.name,
     value: item.id,
   }));
 }
@@ -25,6 +25,8 @@ export function useDict(type?: DictType) {
     try {
       const list = await fetchDictItems(type);
       setItems(list);
+    } catch {
+      setItems([]);
     } finally {
       setLoading(false);
     }

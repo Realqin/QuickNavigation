@@ -1,0 +1,12 @@
+kafka:
+  brokers:
+    - "host.docker.internal:9092"
+  sasl:
+    enabled: false
+  tls:
+    enabled: false
+  startup:
+    maxRetries: 5
+    retryInterval: 2s
+    maxRetryInterval: 30s
+    backoffMultiplier: 2

@@ -86,21 +86,28 @@ function TypeFields({
   if (kind === 'mqtt') {
     return (
       <>
-        <Form.Item
-          name="host"
-          label="Broker 地址"
-          rules={[{ required: true, message: '请输入 Broker 地址' }]}
-          extra="仅 IP 或域名，连接格式为 mqtt://主机:端口，如 mqtt://10.100.0.230:1883"
-        >
-          <Input placeholder="10.100.0.230" />
-        </Form.Item>
-        <Form.Item
-          name="port"
-          label="端口"
-          rules={[{ required: true, message: '请输入端口' }]}
-          extra="MQTT TCP 端口，默认 1883"
-        >
-          <InputNumber min={1} max={65535} className="connection-form-modal__port" />
+        <Form.Item label="连接地址" required extra="连接格式为mqtt://主机:端口">
+          <div className="connection-form-modal__endpoint-row">
+            <div className="connection-form-modal__endpoint-host">
+              <Form.Item
+                name="host"
+                noStyle
+                rules={[{ required: true, message: '请输入连接地址' }]}
+              >
+                <Input placeholder="10.100.0.230" />
+              </Form.Item>
+            </div>
+            <span className="connection-form-modal__endpoint-sep">:</span>
+            <div className="connection-form-modal__endpoint-port">
+              <Form.Item
+                name="port"
+                noStyle
+                rules={[{ required: true, message: '请输入端口' }]}
+              >
+                <InputNumber min={1} max={65535} placeholder="1883" />
+              </Form.Item>
+            </div>
+          </div>
         </Form.Item>
         <Form.Item name="username" label="用户名">
           <Input placeholder="可选" />
@@ -223,47 +230,48 @@ function TypeFields({
         </Form.Item>
         <Form.List name="sub_links">
           {(fields, { add, remove }) => (
-            <>
+            <div className="connection-form-modal__gitlab-sub-section">
+              <div className="connection-form-modal__gitlab-sub-header">
+                <span>子项名称</span>
+                <span>仓库地址</span>
+                <span>Clone 地址</span>
+                <span className="connection-form-modal__gitlab-sub-header-action" />
+              </div>
               {fields.map(({ key, name, ...restField }) => (
                 <div key={key} className="connection-form-modal__gitlab-sub-link-row">
                   <Form.Item
                     {...restField}
                     name={[name, 'name']}
-                    rules={[{ required: true, message: '名称' }]}
-                    className="connection-form-modal__sub-link-name"
+                    rules={[{ required: true, message: '请输入子项名称' }]}
                   >
                     <Input placeholder="子项名称" />
                   </Form.Item>
                   <Form.Item
                     {...restField}
                     name={[name, 'url']}
-                    rules={[{ required: true, message: '仓库 URL' }]}
-                    className="connection-form-modal__sub-link-url"
+                    rules={[{ required: true, message: '请输入仓库地址' }]}
                   >
-                    <Input placeholder="仓库 URL" />
+                    <Input placeholder="https://.../-/tree/main" />
                   </Form.Item>
-                  <Form.Item
-                    {...restField}
-                    name={[name, 'clone_url']}
-                    className="connection-form-modal__sub-link-clone"
-                  >
-                    <Input placeholder="Clone 地址（SSH 或 HTTPS，可选）" />
+                  <Form.Item {...restField} name={[name, 'clone_url']}>
+                    <Input placeholder="git@... 或 https://..." />
                   </Form.Item>
                   <MinusCircleOutlined
+                    className="connection-form-modal__gitlab-sub-remove"
                     onClick={() => remove(name)}
-                    style={{ color: '#ff4d4f', marginTop: 8 }}
                   />
                 </div>
               ))}
               <Button
                 type="dashed"
+                block
                 onClick={() => add({ name: '', url: '', clone_url: '' })}
                 icon={<PlusOutlined />}
-                className="connection-form-modal__sub-link-add"
+                className="connection-form-modal__gitlab-sub-add"
               >
-                添加子链接
+                添加子项
               </Button>
-            </>
+            </div>
           )}
         </Form.List>
       </>
@@ -373,7 +381,7 @@ export default function ConnectionFormModal({
               ? formatKafkaBrokersForInput(connection.host, connection.port)
               : (connection.host ?? undefined),
           port:
-            editKind === 'kafka'
+            editKind === 'kafka' || editKind === 'gitlab'
               ? undefined
               : (connection.port ?? DEFAULT_PORTS[editKind]),
           username: connection.username ?? undefined,
@@ -551,7 +559,7 @@ export default function ConnectionFormModal({
             : '新增连接';
 
   const modalWidth =
-    connectionKind === 'gitlab' ? 760 : connectionKind === 'other' ? 540 : 460;
+    connectionKind === 'gitlab' ? 880 : connectionKind === 'other' ? 540 : 460;
 
   return (
     <Modal
@@ -559,7 +567,7 @@ export default function ConnectionFormModal({
       open={open}
       onCancel={onCancel}
       onOk={handleOk}
-      destroyOnClose
+      destroyOnHidden
       width={modalWidth}
       className="connection-form-modal"
       styles={{ body: { paddingTop: 16, paddingBottom: 12 } }}

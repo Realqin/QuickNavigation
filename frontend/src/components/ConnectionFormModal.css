@@ -1,0 +1,123 @@
+.connection-form-modal .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.connection-form-modal .ant-form-item-label > label {
+  height: 32px;
+}
+
+.connection-form-modal__section {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.connection-form-modal__port {
+  width: 112px;
+}
+
+.connection-form-modal__endpoint-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.connection-form-modal__endpoint-row .ant-form-item {
+  margin-bottom: 0;
+}
+
+.connection-form-modal__endpoint-host {
+  flex: 1;
+  min-width: 0;
+}
+
+.connection-form-modal__endpoint-port {
+  width: 112px;
+  flex-shrink: 0;
+}
+
+.connection-form-modal__endpoint-port .ant-input-number {
+  width: 100%;
+}
+
+.connection-form-modal__endpoint-sep {
+  line-height: 32px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.connection-form-modal__mqtt-sub-title {
+  margin: 0 0 8px 84px;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
+}
+
+.connection-form-modal__test-btn {
+  margin: 4px 0 8px 84px;
+}
+
+.connection-form-modal__sub-link-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+  margin-left: 84px;
+}
+
+.connection-form-modal__sub-link-row .ant-form-item {
+  margin-bottom: 0;
+}
+
+.connection-form-modal__sub-link-name {
+  width: 132px;
+  flex-shrink: 0;
+}
+
+.connection-form-modal__sub-link-url {
+  flex: 1;
+  min-width: 0;
+}
+
+.connection-form-modal__sub-link-add {
+  margin: 0 0 4px 84px;
+}
+
+.connection-form-modal__gitlab-sub-section {
+  margin-bottom: 8px;
+}
+
+.connection-form-modal__gitlab-sub-header,
+.connection-form-modal__gitlab-sub-link-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr) 24px;
+  gap: 8px;
+  align-items: start;
+  margin-left: 84px;
+}
+
+.connection-form-modal__gitlab-sub-header {
+  margin-bottom: 6px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.connection-form-modal__gitlab-sub-link-row {
+  margin-bottom: 10px;
+}
+
+.connection-form-modal__gitlab-sub-link-row .ant-form-item {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.connection-form-modal__gitlab-sub-remove {
+  margin-top: 8px;
+  color: #ff4d4f;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.connection-form-modal__gitlab-sub-add {
+  margin: 4px 0 0 84px;
+  width: calc(100% - 84px);
+}

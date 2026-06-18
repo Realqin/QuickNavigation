@@ -651,6 +651,22 @@ export async function updateApiTestCase(
   return data;
 }
 
+export async function saveApiTestCaseExecutionResult(
+  id: number,
+  payload: {
+    passed: boolean;
+    status_code?: number | null;
+    response?: string | null;
+    detail?: string | null;
+  },
+) {
+  const { data } = await client.post<import('../types/apiTestCase').ApiTestCase>(
+    `/api/api-test-cases/${id}/execution-result`,
+    payload,
+  );
+  return data;
+}
+
 export async function deleteApiTestCase(id: number) {
   await client.delete(`/api/api-test-cases/${id}`);
 }

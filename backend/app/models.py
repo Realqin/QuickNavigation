@@ -219,9 +219,16 @@ class ApiTestCase(Base):
     request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_status: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
     expected_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_assert_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="text")
+    response_assert_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     case_type: Mapped[str] = mapped_column(String(32), nullable=False, default="smoke", index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
     endpoint_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    last_exec_pass: Mapped[bool | None] = mapped_column(nullable=True)
+    last_exec_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_exec_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_exec_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_exec_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -839,6 +839,8 @@ class ApiTestCaseCreate(BaseModel):
     request_body: str | None = None
     expected_status: int = Field(default=200, ge=100, le=599)
     expected_response: str | None = None
+    response_assert_mode: str = Field(default="text", max_length=16)
+    response_assert_rules: str | None = None
     case_type: str = Field(default="smoke", max_length=32)
     endpoint_id: str | None = Field(default=None, max_length=512)
 
@@ -855,8 +857,17 @@ class ApiTestCaseUpdate(BaseModel):
     request_body: str | None = None
     expected_status: int | None = Field(default=None, ge=100, le=599)
     expected_response: str | None = None
+    response_assert_mode: str | None = Field(default=None, max_length=16)
+    response_assert_rules: str | None = None
     case_type: str | None = Field(default=None, max_length=32)
     endpoint_id: str | None = Field(default=None, max_length=512)
+
+
+class ApiTestCaseExecutionResultIn(BaseModel):
+    passed: bool
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    response: str | None = None
+    detail: str | None = None
 
 
 class ApiTestCaseOut(BaseModel):
@@ -874,9 +885,16 @@ class ApiTestCaseOut(BaseModel):
     request_body: str | None = None
     expected_status: int
     expected_response: str | None = None
+    response_assert_mode: str = "text"
+    response_assert_rules: str | None = None
     case_type: str
     status: str
     endpoint_id: str | None = None
+    last_exec_pass: bool | None = None
+    last_exec_status_code: int | None = None
+    last_exec_response: str | None = None
+    last_exec_detail: str | None = None
+    last_exec_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None

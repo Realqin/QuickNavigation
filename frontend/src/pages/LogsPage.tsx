@@ -58,6 +58,7 @@ interface SubscriptionTableRow {
   environment_display?: string;
   connection_type_name?: string | null;
   url?: string;
+  clone_url?: string;
   branch?: string;
   updated_at?: string | null;
   enabled?: boolean;
@@ -129,6 +130,7 @@ function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] 
       environment_display: tree.environment_display,
       connection_type_name: tree.connection_type_name,
       url: mainLink?.url,
+      clone_url: mainLink?.clone_url,
       branch: mainLink?.branch,
       enabled: mainLink?.enabled,
       link_key: mainLink ? 'main' : undefined,
@@ -140,9 +142,11 @@ function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] 
         key: `${tree.id}-${link.link_key}`,
         subscription_id: tree.id,
         connection_id: tree.connection_id,
+        connection_type_name: tree.connection_type_name,
         link_key: link.link_key,
         name: link.name,
         url: link.url,
+        clone_url: link.clone_url,
         branch: link.branch,
         updated_at: link.last_updated_at ?? null,
         enabled: link.enabled,
@@ -496,7 +500,7 @@ export default function LogsPage() {
         dataSource={tableData}
         pagination={false}
         style={{ marginBottom: 24 }}
-        scroll={{ x: 1280 }}
+        scroll={{ x: 1480 }}
         expandable={{
           defaultExpandAllRows: true,
           rowExpandable: (record) => (record.children?.length ?? 0) > 0,
@@ -545,7 +549,7 @@ export default function LogsPage() {
           {
             title: '地址',
             dataIndex: 'url',
-            width: 300,
+            width: 260,
             render: (v: string | undefined) =>
               v ? (
                 <Typography.Text
@@ -555,6 +559,31 @@ export default function LogsPage() {
                   {v}
                 </Typography.Text>
               ) : null,
+          },
+          {
+            title: 'Clone 地址',
+            dataIndex: 'clone_url',
+            width: 240,
+            render: (v: string | undefined, record) => {
+              if (!isGitlabConnection(record.connection_type_name ?? null)) {
+                return null;
+              }
+              if (!v?.trim()) {
+                return (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    未配置
+                  </Typography.Text>
+                );
+              }
+              return (
+                <Typography.Text
+                  copyable
+                  style={{ fontSize: 12, wordBreak: 'break-all', whiteSpace: 'normal' }}
+                >
+                  {v}
+                </Typography.Text>
+              );
+            },
           },
           {
             title: '分支',

@@ -443,15 +443,12 @@ export default function ConnectionsPage() {
                 row.kind === 'child'
                   ? getChildSubLink(row)?.last_checked_at
                   : row.connection.last_checked_at;
+              const tip = checkedAt
+                ? `最近检测：${new Date(checkedAt).toLocaleString()}`
+                : '尚未检测';
               return (
-                <Tooltip
-                  title={
-                    checkedAt
-                      ? `最近检测：${new Date(checkedAt).toLocaleString()}`
-                      : '尚未检测'
-                  }
-                >
-                  {renderReachabilityStatus(reachable)}
+                <Tooltip title={tip}>
+                  <span className="connections-page__status-cell">{renderReachabilityStatus(reachable)}</span>
                 </Tooltip>
               );
             },

@@ -26,6 +26,7 @@ from app.schemas import (
     AiAnalysisOut,
     ApiTestCaseCreate,
     ApiTestCaseBatchDeleteOut,
+    ApiTestCaseExecutionResultIn,
     ApiTestCaseGenerateIn,
     ApiTestCaseGenerateOut,
     ApiTestCaseListOut,
@@ -1120,6 +1121,20 @@ async def generate_api_test_cases(payload: ApiTestCaseGenerateIn, db: Session = 
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api-test-cases/{case_id}/execution-result", response_model=ApiTestCaseOut)
+def save_api_test_case_execution_result(
+    case_id: int,
+    payload: ApiTestCaseExecutionResultIn,
+    db: Session = Depends(get_db),
+):
+    from app.api_test_case_service import save_api_test_case_execution_result as persist_execution_result
+
+    try:
+        return ApiTestCaseOut(**persist_execution_result(db, case_id, payload.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/api-test-cases/{case_id}/restore", response_model=ApiTestCaseOut)
