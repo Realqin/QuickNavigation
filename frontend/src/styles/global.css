@@ -32,6 +32,60 @@ a {
 
 
 
+/* ---- Global overlay constraints (Tooltip / Popover / Popconfirm) ---- */
+
+:root {
+
+  --qn-overlay-max-width: min(480px, calc(100vw - 32px));
+
+  --qn-overlay-max-height: min(420px, calc(100vh - 32px));
+
+}
+
+
+
+.ant-tooltip .ant-tooltip-inner {
+
+  max-width: var(--qn-overlay-max-width);
+
+  max-height: var(--qn-overlay-max-height);
+
+  overflow-x: hidden;
+
+  overflow-y: auto;
+
+  word-break: break-word;
+
+  overflow-wrap: anywhere;
+
+}
+
+
+
+.ant-popover .ant-popover-inner {
+
+  max-width: var(--qn-overlay-max-width);
+
+}
+
+
+
+.ant-popover .ant-popover-inner-content {
+
+  max-height: var(--qn-overlay-max-height);
+
+  overflow-x: hidden;
+
+  overflow-y: auto;
+
+  word-break: break-word;
+
+  overflow-wrap: anywhere;
+
+}
+
+
+
 /* ---- App shell ---- */
 
 .app-shell {
@@ -2409,6 +2463,8 @@ html:has(.embedded-console-page--standalone) body {
 
   min-width: 0;
 
+  overflow-anchor: none;
+
 }
 
 
@@ -2456,10 +2512,21 @@ html:has(.embedded-console-page--standalone) body {
   line-height: 1.5;
 }
 
+.api-monitor-cases__outcome-tooltip-overlay {
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  pointer-events: none;
+}
+
 .api-monitor-cases__outcome-tooltip-overlay .ant-tooltip-inner {
-  width: min(520px, 72vw);
-  max-width: min(520px, 72vw);
+  width: min(460px, calc(100vw - 16px));
+  max-width: min(460px, calc(100vw - 16px));
+  max-height: min(320px, calc(100vh - 80px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px 12px;
+  pointer-events: auto;
 }
 
 .api-monitor-cases__outcome-tooltip {
@@ -2488,14 +2555,13 @@ html:has(.embedded-console-page--standalone) body {
 }
 
 .api-monitor-cases__outcome-tooltip-body {
-  max-height: 240px;
   margin: 0;
   padding: 8px 10px;
-  overflow: auto;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.22);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   font-size: 12px;
   line-height: 1.45;
   color: #fff;
@@ -2808,6 +2874,35 @@ html:has(.embedded-console-page--standalone) body {
   padding: 24px 12px;
   text-align: center;
   font-size: 13px;
+}
+
+.schema-change-compare {
+  padding-bottom: 4px;
+}
+
+.schema-change-compare__pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(0, 0, 0, 0.78);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.schema-change-modal .ant-modal-body {
+  max-height: min(78vh, 860px);
+  overflow: auto;
+}
+
+html[data-theme='dark'] .schema-change-compare__pre,
+.dark .schema-change-compare__pre {
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .admin-page {

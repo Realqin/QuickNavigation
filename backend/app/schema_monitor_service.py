@@ -47,6 +47,8 @@ class SchemaChange:
     summary: str
     details: list[str] = field(default_factory=list)
     sql_preview: str | None = None
+    before: str | None = None
+    after: str | None = None
 
 
 def _mask_dsn(dsn: str) -> str:
@@ -192,11 +194,62 @@ def _resolve_monitor_connection(monitor: dict[str, Any]) -> dict[str, Any]:
     return {"host": "", "port": 3306, "username": "", "password": ""}
 
 
+def _connection_monitor_connection(conn: Connection) -> dict[str, Any]:
+    host = str(conn.host or "").strip()
+    username = str(conn.username or "").strip()
+    password = str(conn.password or "")
+    port = int(conn.port or 3306)
+
+    if host and username and password:
+        return {
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+        }
+
+    raw_url = str(conn.url or "").strip()
+    if not raw_url:
+        return {"host": host, "port": port, "username": username, "password": password}
+
+    try:
+        if _is_navicat_mysql_url(raw_url):
+            parsed = parse_navicat_mysql_url(raw_url)
+            resolved_password = password or str(parsed.get("password") or "")
+            resolved_host = host or str(parsed.get("host") or "").strip()
+            resolved_username = username or str(parsed.get("username") or "").strip()
+            resolved_port = port if conn.port else int(parsed.get("port") or 3306)
+            return {
+                "host": resolved_host,
+                "port": resolved_port,
+                "username": resolved_username,
+                "password": resolved_password,
+            }
+
+        if _is_mysql_dsn(raw_url):
+            legacy = _legacy_dsn_to_connection(raw_url)
+            resolved_password = password or str(legacy.get("password") or "")
+            return {
+                "host": host or str(legacy.get("host") or "").strip(),
+                "port": port if conn.port else int(legacy.get("port") or 3306),
+                "username": username or str(legacy.get("username") or "").strip(),
+                "password": resolved_password,
+            }
+    except ValueError:
+        pass
+
+    return {"host": host, "port": port, "username": username, "password": password}
+
+
 def get_schema_monitor_config(sub: Subscription) -> dict[str, Any]:
     monitor = _parse_db_filter(sub).get("schema_monitor") or {}
     if not isinstance(monitor, dict):
         monitor = {}
     connection = _resolve_monitor_connection(monitor)
+    if not (connection["host"] and connection["username"] and connection["password"]) and sub.connection:
+        fallback = _connection_monitor_connection(sub.connection)
+        if fallback["host"] and fallback["username"] and fallback["password"]:
+            connection = fallback
     include = monitor.get("include_databases") or []
     exclude = monitor.get("exclude_databases") or []
     configured = bool(
@@ -436,6 +489,63 @@ def _describe_index_changes(
     return messages
 
 
+def _format_column_line(column: dict[str, Any]) -> str:
+    parts = [
+        str(column.get("COLUMN_NAME") or ""),
+        str(column.get("COLUMN_TYPE") or ""),
+    ]
+    if column.get("IS_NULLABLE") == "NO":
+        parts.append("NOT NULL")
+    column_key = str(column.get("COLUMN_KEY") or "")
+    if column_key == "PRI":
+        parts.append("PRIMARY KEY")
+    elif column_key == "UNI":
+        parts.append("UNIQUE")
+    elif column_key == "MUL":
+        parts.append("INDEX")
+    extra = str(column.get("EXTRA") or "").strip()
+    if extra:
+        parts.append(extra.upper())
+    default = column.get("COLUMN_DEFAULT")
+    if default is not None:
+        parts.append(f"DEFAULT {default}")
+    return " ".join(parts)
+
+
+def _format_columns(columns: list[dict[str, Any]]) -> str:
+    if not columns:
+        return "（无列定义）"
+    return "\n".join(_format_column_line(item) for item in columns)
+
+
+def _format_indexes(indexes: list[dict[str, Any]]) -> str:
+    if not indexes:
+        return "（无索引）"
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in indexes:
+        name = str(row.get("INDEX_NAME") or "")
+        grouped.setdefault(name, []).append(row)
+    lines: list[str] = []
+    for name in sorted(grouped):
+        rows = sorted(grouped[name], key=lambda item: int(item.get("SEQ_IN_INDEX") or 0))
+        columns = ", ".join(str(row.get("COLUMN_NAME") or "") for row in rows)
+        if name == "PRIMARY":
+            lines.append(f"PRIMARY KEY ({columns})")
+            continue
+        unique = "UNIQUE " if rows[0].get("NON_UNIQUE") == 0 else ""
+        index_type = str(rows[0].get("INDEX_TYPE") or "BTREE")
+        lines.append(f"{unique}INDEX {name} ({columns}) USING {index_type}")
+    return "\n".join(lines)
+
+
+def _format_table_schema(table: dict[str, Any] | None) -> str:
+    if not table:
+        return ""
+    columns = _format_columns(table.get("columns") or [])
+    indexes = _format_indexes(table.get("indexes") or [])
+    return f"【列】\n{columns}\n\n【索引】\n{indexes}"
+
+
 def diff_schema_snapshots(old: dict[str, Any] | None, new: dict[str, Any]) -> list[SchemaChange]:
     if not old:
         return []
@@ -452,6 +562,9 @@ def diff_schema_snapshots(old: dict[str, Any] | None, new: dict[str, Any]) -> li
                 operation="CREATE_DATABASE",
                 table=database,
                 summary=f"新增数据库 {database}",
+                before="（不存在）",
+                after=f"数据库 {database}",
+                details=[f"新增数据库 {database}"],
             )
         )
 
@@ -461,24 +574,37 @@ def diff_schema_snapshots(old: dict[str, Any] | None, new: dict[str, Any]) -> li
                 operation="DROP_DATABASE",
                 table=database,
                 summary=f"删除数据库 {database}",
+                before=f"数据库 {database}",
+                after="（已删除）",
+                details=[f"删除数据库 {database}"],
             )
         )
 
     for table_key in sorted(set(new_tables) - set(old_tables)):
+        new_table = new_tables[table_key]
+        schema_text = _format_table_schema(new_table)
         changes.append(
             SchemaChange(
                 operation="CREATE_TABLE",
                 table=table_key,
                 summary=f"新增表 {table_key}",
+                before="（不存在）",
+                after=schema_text,
+                details=[f"新增表 {table_key}"],
             )
         )
 
     for table_key in sorted(set(old_tables) - set(new_tables)):
+        old_table = old_tables[table_key]
+        schema_text = _format_table_schema(old_table)
         changes.append(
             SchemaChange(
                 operation="DROP_TABLE",
                 table=table_key,
                 summary=f"删除表 {table_key}",
+                before=schema_text,
+                after="（已删除）",
+                details=[f"删除表 {table_key}"],
             )
         )
 
@@ -508,6 +634,8 @@ def diff_schema_snapshots(old: dict[str, Any] | None, new: dict[str, Any]) -> li
                 table=table_key,
                 summary=summary,
                 details=details,
+                before=_format_table_schema(old_table),
+                after=_format_table_schema(new_table),
                 sql_preview="; ".join(details) if details else None,
             )
         )
@@ -556,6 +684,9 @@ def _change_to_payload(change: SchemaChange) -> dict[str, Any]:
         "table": change.table,
         "summary": change.summary,
         "details": change.details,
+        "diff": change.details,
+        "before": change.before,
+        "after": change.after,
     }
 
 

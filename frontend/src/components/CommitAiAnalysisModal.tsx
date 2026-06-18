@@ -2,6 +2,12 @@ import { Alert, Button, Modal, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchAiAnalysis } from '../api';
 import type { AiAnalysisResult } from '../types/aiAnalysis';
+import {
+  LOG_AI_MODAL_VARIANTS,
+  resolveLogAiModalTitle,
+  type LogAiModalVariant,
+} from '../utils/logAiModal';
+import CodeInterpretationView from './CodeInterpretationView';
 import MarkdownContent from './MarkdownContent';
 import './CommitAiAnalysisModal.css';
 
@@ -9,21 +15,23 @@ interface Props {
   logId: number | null;
   commitSha?: string | null;
   summary?: string | null;
+  variant?: LogAiModalVariant;
   open: boolean;
   onClose: () => void;
 }
 
-function resolveErrorMessage(error: unknown): string {
+function resolveErrorMessage(error: unknown, fallback: string): string {
   const detail =
     (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
     (error instanceof Error ? error.message : null);
-  return detail ? String(detail) : 'AI 分析失败，请稍后重试';
+  return detail ? String(detail) : fallback;
 }
 
 export default function CommitAiAnalysisModal({
   logId,
   commitSha,
   summary,
+  variant = 'analysis',
   open,
   onClose,
 }: Props) {
@@ -31,7 +39,8 @@ export default function CommitAiAnalysisModal({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AiAnalysisResult | null>(null);
 
-  const title = commitSha ? `AI 分析 · ${commitSha.slice(0, 7)}` : 'AI 分析';
+  const config = LOG_AI_MODAL_VARIANTS[variant];
+  const title = resolveLogAiModalTitle(variant, commitSha);
 
   const metaText = useMemo(() => {
     if (!result) {
@@ -47,7 +56,7 @@ export default function CommitAiAnalysisModal({
 
   const loadAnalysis = useCallback(async () => {
     if (logId == null) {
-      setError('缺少日志信息，无法分析');
+      setError(`缺少日志信息，无法${config.title}`);
       setResult(null);
       return;
     }
@@ -57,17 +66,18 @@ export default function CommitAiAnalysisModal({
     try {
       const data = await fetchAiAnalysis({
         log_id: logId,
-        scenario: 'commit-diff',
+        scenario: config.scenario,
+        prompt_type: config.promptType,
         summary: summary ?? undefined,
       });
       setResult(data);
     } catch (err) {
       setResult(null);
-      setError(resolveErrorMessage(err));
+      setError(resolveErrorMessage(err, config.errorFallback));
     } finally {
       setLoading(false);
     }
-  }, [logId, summary]);
+  }, [config.errorFallback, config.promptType, config.scenario, config.title, logId, summary]);
 
   useEffect(() => {
     if (!open) {
@@ -81,12 +91,12 @@ export default function CommitAiAnalysisModal({
 
   return (
     <Modal
-      className="commit-ai-analysis-modal"
+      className={['commit-ai-analysis-modal', config.modalClassName].filter(Boolean).join(' ')}
       title={title}
       open={open}
       onCancel={onClose}
       footer={null}
-      width={720}
+      width={config.modalWidth}
       destroyOnHidden
     >
       {summary ? (
@@ -97,7 +107,7 @@ export default function CommitAiAnalysisModal({
 
       {loading ? (
         <div className="commit-ai-analysis-modal__loading">
-          <Spin tip="AI 分析中，请稍候…" />
+          <Spin tip={config.loadingText} />
         </div>
       ) : null}
 
@@ -105,7 +115,7 @@ export default function CommitAiAnalysisModal({
         <Alert
           type="error"
           showIcon
-          message="分析失败"
+          message={config.failureTitle}
           description={error}
           style={{ marginBottom: 12 }}
         />
@@ -118,17 +128,23 @@ export default function CommitAiAnalysisModal({
               {metaText}
             </Typography.Paragraph>
           ) : null}
-          <MarkdownContent
-            content={result.analysis}
-            className="commit-ai-analysis-modal__body markdown-body"
-          />
+          {variant === 'code-interpretation' && result.interpretation?.files?.length ? (
+            <div className="commit-ai-analysis-modal__body commit-ai-analysis-modal__body--interpretation">
+              <CodeInterpretationView data={result.interpretation} />
+            </div>
+          ) : (
+            <MarkdownContent
+              content={result.analysis}
+              className="commit-ai-analysis-modal__body markdown-body"
+            />
+          )}
         </>
       ) : null}
 
       <div className="commit-ai-analysis-modal__footer">
         {error ? (
           <Button onClick={() => void loadAnalysis()} loading={loading}>
-            重新分析
+            {config.retryLabel}
           </Button>
         ) : null}
         <Button type="primary" onClick={onClose}>

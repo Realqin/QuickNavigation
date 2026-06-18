@@ -1,7 +1,8 @@
-import { Button, Modal, Spin, Typography } from 'antd';
+import { Button, Modal, Space, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { fetchLogDiff } from '../api';
 import type { ActivityLogDiff } from '../types';
+import type { LogAiModalVariant } from '../utils/logAiModal';
 import { fileDiffTitle, parseUnifiedDiff, type DiffCellType } from '../utils/parseUnifiedDiff';
 import CommitAiAnalysisModal from './CommitAiAnalysisModal';
 import './CommitDiffModal.css';
@@ -35,6 +36,7 @@ export default function CommitDiffModal({
   const [loading, setLoading] = useState(false);
   const [diffData, setDiffData] = useState<ActivityLogDiff | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiVariant, setAiVariant] = useState<LogAiModalVariant>('analysis');
 
   useEffect(() => {
     if (!open || logId == null) {
@@ -56,8 +58,14 @@ export default function CommitDiffModal({
   useEffect(() => {
     if (!open) {
       setAiOpen(false);
+      setAiVariant('analysis');
     }
   }, [open]);
+
+  const openAiModal = (variant: LogAiModalVariant) => {
+    setAiVariant(variant);
+    setAiOpen(true);
+  };
 
   const title = commitSha ? `提交对比 · ${commitSha.slice(0, 7)}` : '提交对比';
   const hasDiff = fileDiffs.length > 0;
@@ -128,9 +136,12 @@ export default function CommitDiffModal({
 
           {!loading && logId != null && commitSha ? (
             <div className="commit-diff-footer">
-              <Button type="primary" onClick={() => setAiOpen(true)}>
-                AI 分析
-              </Button>
+              <Space>
+                <Button onClick={() => openAiModal('code-interpretation')}>代码解读</Button>
+                <Button type="primary" onClick={() => openAiModal('analysis')}>
+                  AI 分析
+                </Button>
+              </Space>
             </div>
           ) : null}
         </>
@@ -140,6 +151,7 @@ export default function CommitDiffModal({
         logId={logId}
         commitSha={commitSha}
         summary={summary}
+        variant={aiVariant}
         open={aiOpen}
         onClose={() => setAiOpen(false)}
       />

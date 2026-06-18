@@ -769,6 +769,9 @@ def init_db() -> None:
         from app.prompt_template_service import ensure_general_ai_analysis_prompt
 
         ensure_general_ai_analysis_prompt(db)
+        from app.prompt_template_service import ensure_code_interpretation_prompt
+
+        ensure_code_interpretation_prompt(db)
         from app.repo_access_service import sync_repo_access_cache_from_db
 
         sync_repo_access_cache_from_db(db)

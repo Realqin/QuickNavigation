@@ -51,11 +51,13 @@ def _build_user_prompt(
 
 
 async def run_ai_analysis(db: Session, payload: dict) -> dict:
-    prompt_type = str(payload.get("prompt_type") or "AI分析").strip() or "AI分析"
+    scenario = str(payload.get("scenario") or "generic").strip()
+    prompt_type = str(payload.get("prompt_type") or "").strip()
+    if not prompt_type:
+        prompt_type = "代码解读" if scenario == "code-interpretation" else "AI分析"
     prompt = get_prompt_template_for_type(db, prompt_type)
     llm_config = get_active_llm_config(db)
 
-    scenario = str(payload.get("scenario") or "generic").strip()
     title = str(payload.get("title") or "").strip()
     summary = str(payload.get("summary") or "").strip()
     context = str(payload.get("context") or "").strip()
@@ -82,6 +84,18 @@ async def run_ai_analysis(db: Session, payload: dict) -> dict:
         extra.setdefault("仓库", diff_data.get("repo") or "")
         extra.setdefault("分支", diff_data.get("branch") or "")
         extra.setdefault("提交", diff_data.get("commit_sha") or "")
+
+        if scenario == "code-interpretation":
+            from app.code_interpretation_service import run_code_interpretation
+
+            return await run_code_interpretation(db, diff_text=content, summary=summary)
+
+    if scenario == "code-interpretation":
+        from app.code_interpretation_service import run_code_interpretation
+
+        if not content:
+            raise ValueError("缺少代码 diff 内容")
+        return await run_code_interpretation(db, diff_text=content, summary=summary)
 
     diff_truncated = False
     if content:

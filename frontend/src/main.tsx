@@ -13,6 +13,28 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         algorithm: theme.defaultAlgorithm,
         token: { colorPrimary: '#1677ff', borderRadius: 8 },
       }}
+      tooltip={{
+        styles: {
+          root: { maxWidth: 'min(480px, calc(100vw - 32px))' },
+          body: {
+            maxHeight: 'min(420px, calc(100vh - 32px))',
+            overflowX: 'hidden',
+            overflowY: 'auto',
+            wordBreak: 'break-word',
+          },
+        },
+      }}
+      popover={{
+        styles: {
+          root: { maxWidth: 'min(480px, calc(100vw - 32px))' },
+          body: {
+            maxHeight: 'min(420px, calc(100vh - 32px))',
+            overflowX: 'hidden',
+            overflowY: 'auto',
+            wordBreak: 'break-word',
+          },
+        },
+      }}
     >
       <AntdApp>
         <App />

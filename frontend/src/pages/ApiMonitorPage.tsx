@@ -764,8 +764,8 @@ export default function ApiMonitorPage() {
           </div>
 
           {!filtersExpanded ? (
-            <div className="api-monitor-page__filter-summary" title={filterSummaryText}>
-              <Typography.Text type="secondary" ellipsis>
+            <div className="api-monitor-page__filter-summary">
+              <Typography.Text type="secondary" ellipsis={{ tooltip: filterSummaryText }}>
                 {filterSummaryText}
               </Typography.Text>
             </div>

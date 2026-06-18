@@ -5,6 +5,7 @@ export const PROMPT_TYPE_OPTIONS = [
   '缺陷分析',
   '接口用例',
   'AI分析',
+  '代码解读',
 ] as const;
 
 export type PromptType = (typeof PROMPT_TYPE_OPTIONS)[number];

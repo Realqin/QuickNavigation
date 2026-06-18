@@ -462,6 +462,39 @@ def _run_git(args: list[str], *, cwd: Path | None = None) -> str:
     return (result.stdout or "").strip()
 
 
+def _is_shallow_repo(cwd: Path) -> bool:
+    try:
+        return _run_git(["rev-parse", "--is-shallow-repository"], cwd=cwd).strip() == "true"
+    except RuntimeError:
+        return False
+
+
+def _remote_branch_exists(cwd: Path, branch: str) -> bool:
+    try:
+        _run_git(["rev-parse", "--verify", f"origin/{branch}^{{commit}}"], cwd=cwd)
+        return True
+    except RuntimeError:
+        return False
+
+
+def _ensure_remote_branch(cwd: Path, branch: str) -> None:
+    if _remote_branch_exists(cwd, branch):
+        return
+
+    fetch_args = ["fetch", "origin", f"{branch}:refs/remotes/origin/{branch}"]
+    if _is_shallow_repo(cwd):
+        fetch_args[1:1] = ["--depth", "1"]
+    _run_git(fetch_args, cwd=cwd)
+
+
+def _checkout_branch(cwd: Path, branch: str) -> None:
+    _ensure_remote_branch(cwd, branch)
+    try:
+        _run_git(["checkout", branch], cwd=cwd)
+    except RuntimeError:
+        _run_git(["checkout", "-B", branch, f"origin/{branch}"], cwd=cwd)
+
+
 def _clone_or_update_repo(clone_url: str, branch: str, target_dir: Path) -> str:
     verify_gitlab_repo_access(clone_url)
     effective_url = prepare_git_clone_url(clone_url)
@@ -469,10 +502,7 @@ def _clone_or_update_repo(clone_url: str, branch: str, target_dir: Path) -> str:
     if target_dir.exists() and (target_dir / ".git").exists():
         _run_git(["remote", "set-url", "origin", effective_url], cwd=target_dir)
         _run_git(["fetch", "--all", "--prune"], cwd=target_dir)
-        try:
-            _run_git(["checkout", branch], cwd=target_dir)
-        except RuntimeError:
-            _run_git(["checkout", "-B", branch, f"origin/{branch}"], cwd=target_dir)
+        _checkout_branch(target_dir, branch)
         _run_git(["pull", "--ff-only", "origin", branch], cwd=target_dir)
     else:
         if target_dir.exists():
@@ -483,7 +513,7 @@ def _clone_or_update_repo(clone_url: str, branch: str, target_dir: Path) -> str:
             )
         except RuntimeError:
             _run_git(["clone", "--depth", "1", effective_url, str(target_dir)])
-            _run_git(["checkout", branch], cwd=target_dir)
+            _checkout_branch(target_dir, branch)
     return _run_git(["rev-parse", "HEAD"], cwd=target_dir)
 
 

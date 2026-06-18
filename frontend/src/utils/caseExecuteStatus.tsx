@@ -9,7 +9,7 @@ export interface CaseExecuteOutcome {
   body?: string;
 }
 
-function truncateTooltipBody(body: string, maxLength = 4000): string {
+function truncateTooltipBody(body: string, maxLength = 1200): string {
   const text = body.trim();
   if (text.length <= maxLength) {
     return text;
@@ -30,6 +30,26 @@ export function buildCaseExecuteOutcome(record: ApiTestCase): CaseExecuteOutcome
     body: record.last_exec_response ?? undefined,
   };
 }
+
+const EXECUTE_OUTCOME_TOOLTIP_PROPS = {
+  classNames: { root: 'api-monitor-cases__outcome-tooltip-overlay' },
+  placement: 'top' as const,
+  getPopupContainer: () => document.body,
+  destroyTooltipOnHide: true,
+  mouseEnterDelay: 0.15,
+  styles: {
+    root: {
+      maxWidth: 'calc(100vw - 16px)',
+    },
+    body: {
+      maxWidth: 'min(460px, calc(100vw - 16px))',
+      maxHeight: 'min(320px, calc(100vh - 80px))',
+      overflowX: 'hidden',
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+    },
+  },
+};
 
 export function renderCaseExecuteOutcomeTooltip(outcome: CaseExecuteOutcome) {
   if (outcome.statusCode == null && !outcome.body && !outcome.reason) {
@@ -82,14 +102,20 @@ export function renderCaseExecuteStatusCell(record: ApiTestCase) {
   );
 
   if (outcome.statusCode == null && outcome.body == null) {
-    return outcome.pass ? tag : <Tooltip title={outcome.reason || '执行未通过'}>{tag}</Tooltip>;
+    return (
+      <Tooltip
+        title={outcome.reason || '执行未通过'}
+        placement="top"
+        getPopupContainer={() => document.body}
+        destroyTooltipOnHide
+      >
+        {tag}
+      </Tooltip>
+    );
   }
 
   return (
-    <Tooltip
-      overlayClassName="api-monitor-cases__outcome-tooltip-overlay"
-      title={renderCaseExecuteOutcomeTooltip(outcome)}
-    >
+    <Tooltip {...EXECUTE_OUTCOME_TOOLTIP_PROPS} title={renderCaseExecuteOutcomeTooltip(outcome)}>
       {tag}
     </Tooltip>
   );

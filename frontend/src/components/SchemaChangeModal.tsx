@@ -1,10 +1,7 @@
-import { List, Modal, Space, Tag, Typography } from 'antd';
+import { Divider, Modal, Typography } from 'antd';
 import type { ActivityLog } from '../types';
-import {
-  getSchemaChanges,
-  schemaOperationColor,
-  schemaOperationLabel,
-} from '../utils/schemaChangeLog';
+import { getSchemaChanges } from '../utils/schemaChangeLog';
+import SchemaChangeCompareView from './SchemaChangeCompareView';
 
 interface Props {
   log: ActivityLog | null;
@@ -21,8 +18,9 @@ export default function SchemaChangeModal({ log, open, onClose }: Props) {
       open={open}
       onCancel={onClose}
       footer={null}
-      width={640}
+      width={1080}
       destroyOnHidden
+      className="schema-change-modal"
     >
       {log?.summary ? (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 13 }}>
@@ -30,37 +28,16 @@ export default function SchemaChangeModal({ log, open, onClose }: Props) {
         </Typography.Paragraph>
       ) : null}
 
-      <List
-        size="small"
-        dataSource={changes}
-        locale={{ emptyText: '暂无变更明细' }}
-        renderItem={(item) => (
-          <List.Item style={{ display: 'block', paddingInline: 0 }}>
-            <Space size={6} wrap style={{ marginBottom: item.details?.length ? 6 : 0 }}>
-              <Tag color={schemaOperationColor(item.operation)}>
-                {schemaOperationLabel(item.operation)}
-              </Tag>
-              {item.table ? (
-                <Typography.Text code style={{ fontSize: 12 }}>
-                  {item.table}
-                </Typography.Text>
-              ) : null}
-            </Space>
-            <Typography.Text style={{ display: 'block', fontSize: 13 }}>
-              {item.summary}
-            </Typography.Text>
-            {item.details && item.details.length > 0 ? (
-              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'rgba(0,0,0,0.65)' }}>
-                {item.details.map((detail) => (
-                  <li key={`${item.table}-${detail}`} style={{ fontSize: 13, marginBottom: 2 }}>
-                    {detail}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </List.Item>
-        )}
-      />
+      {changes.length === 0 ? (
+        <Typography.Text type="secondary">暂无变更明细</Typography.Text>
+      ) : (
+        changes.map((item, index) => (
+          <div key={`${item.operation}-${item.table ?? index}`}>
+            {index > 0 ? <Divider style={{ margin: '16px 0' }} /> : null}
+            <SchemaChangeCompareView item={item} />
+          </div>
+        ))
+      )}
     </Modal>
   );
 }

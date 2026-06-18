@@ -41,6 +41,7 @@ import { extractCommitSha } from '../utils/activityLogDetail';
 import { formatBeijingTime } from '../utils/dateTime';
 import { getApiMonitorChangeCount, isApiMonitorChangeLog } from '../utils/apiMonitorChangeLog';
 import { getSchemaChanges, isSchemaChangeLog } from '../utils/schemaChangeLog';
+import type { LogAiModalVariant } from '../utils/logAiModal';
 
 const ENABLED_FILTER_OPTIONS = [
   { label: '已启用', value: true },
@@ -194,6 +195,7 @@ export default function LogsPage() {
   const [aiLogId, setAiLogId] = useState<number | null>(null);
   const [aiCommitSha, setAiCommitSha] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiVariant, setAiVariant] = useState<LogAiModalVariant>('analysis');
   const [aiOpen, setAiOpen] = useState(false);
   const [webhookBase, setWebhookBase] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -270,12 +272,13 @@ export default function LogsPage() {
     openActivityLogDetail(log);
   };
 
-  const openAiAnalysis = (log: ActivityLog) => {
+  const openLogAiModal = (log: ActivityLog, variant: LogAiModalVariant) => {
     const sha = extractCommitSha(log);
     if (!sha) return;
     setAiLogId(log.id);
     setAiCommitSha(sha);
     setAiSummary(log.summary ?? null);
+    setAiVariant(variant);
     setAiOpen(true);
   };
 
@@ -745,15 +748,30 @@ export default function LogsPage() {
           },
           {
             title: '操作',
-            width: 90,
+            width: 120,
             fixed: 'right',
             render: (_, record) => {
               const sha = extractCommitSha(record);
               if (!sha) return null;
               return (
-                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openAiAnalysis(record)}>
-                  AI 分析
-                </Button>
+                <Space size={4} direction="vertical">
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0 }}
+                    onClick={() => openLogAiModal(record, 'analysis')}
+                  >
+                    AI 分析
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0 }}
+                    onClick={() => openLogAiModal(record, 'code-interpretation')}
+                  >
+                    代码解读
+                  </Button>
+                </Space>
               );
             },
           },
@@ -764,12 +782,14 @@ export default function LogsPage() {
         logId={aiLogId}
         commitSha={aiCommitSha}
         summary={aiSummary}
+        variant={aiVariant}
         open={aiOpen}
         onClose={() => {
           setAiOpen(false);
           setAiLogId(null);
           setAiCommitSha(null);
           setAiSummary(null);
+          setAiVariant('analysis');
         }}
       />
       {detailModals}

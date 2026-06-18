@@ -948,6 +948,7 @@ class AiAnalysisIn(BaseModel):
 
 class AiAnalysisOut(BaseModel):
     analysis: str
+    interpretation: dict[str, Any] | None = None
     model: str = ""
     prompt_type: str = "AI分析"
     prompt_name: str = ""

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import PromptTemplate
 
 
-PROMPT_TYPE_OPTIONS = ("通用对话", "需求评审", "测试用例", "缺陷分析", "接口用例", "AI分析")
+PROMPT_TYPE_OPTIONS = ("通用对话", "需求评审", "测试用例", "缺陷分析", "接口用例", "AI分析", "代码解读")
 
 GENERAL_AI_ANALYSIS_BASE_CONTENT = (
     "你是资深软件工程与测试分析专家。用户会提供代码变更、配置变更、接口变更或业务变更的描述与 diff。"
@@ -24,6 +24,51 @@ GENERAL_AI_ANALYSIS_BASE_CONTENT = (
 
 GENERAL_AI_ANALYSIS_RESPONSE_FORMAT = (
     "使用 Markdown 正文输出，包含二级标题（##），不要使用 JSON 或代码块包裹整段回复。"
+)
+
+CODE_INTERPRETATION_BASE_CONTENT = (
+    "你是代码讲解专家。用户会提供 unified diff。"
+    "你的输出必须分两步完成，顺序不可颠倒："
+    "【第一步：原样展示代码】"
+    "从 diff 中提取变更涉及的代码片段，放入 Markdown 代码块中。"
+    "代码必须与 diff 原文一字不差：不得改写、缩写、省略、换行合并或调整空格/缩进/标点。"
+    "只展示 diff 中实际变更的 hunk；纯新增只展示修改后，纯删除只展示修改前，修改则分别展示修改前与修改后。"
+    "【第二步：逐行加注释】"
+    "在第一步展示的代码块内，给每一行（含空行、仅含 { } 的行）在**行尾**追加中文注释，说明该行含义。"
+    "注释格式：两个空格 + 单行注释符 + 「备注：」+ 中文解释。"
+    "单行注释符按语言选择：Java/C/JS/TS/Go 等用 //；Python/YAML 用 #；SQL 用 --；"
+    "若无法确定语言，默认用 //。"
+    "示例（注意代码原文未被改动，只在行尾追加备注）："
+    "```java\n"
+    "if (user == null) {  // 备注：判断 user 是否为空\n"
+    "    throw new BizException(\"用户不存在\");  // 备注：用户不存在时抛出业务异常\n"
+    "}\n"
+    "```\n"
+    "【第三步：逻辑变化总结】"
+    "每个文件在代码块之后，用简短条目说明：修改前逻辑、修改后逻辑、核心差异。"
+    "【硬性禁止】"
+    "禁止用表格代替代码；禁止只写文字描述而不展示完整代码；"
+    "禁止输出测试建议、风险评级、回归清单；禁止修改任何原始代码字符。"
+)
+
+CODE_INTERPRETATION_RESPONSE_FORMAT = (
+    "使用 Markdown 输出，每个变更文件一组，结构如下：\n\n"
+    "## 文件：`路径/文件名`\n\n"
+    "### 修改前代码\n"
+    "（若无删除/修改前内容，写「无」）\n"
+    "```java\n"
+    "    return null;  // 备注：查不到用户时直接返回 null\n"
+    "```\n\n"
+    "### 修改后代码\n"
+    "（若无新增/修改后内容，写「无」）\n"
+    "```java\n"
+    "    throw new BizException(\"用户不存在\");  // 备注：查不到用户时抛出业务异常\n"
+    "```\n\n"
+    "### 逻辑变化总结\n"
+    "- **修改前逻辑**：...\n"
+    "- **修改后逻辑**：...\n"
+    "- **核心差异**：...\n\n"
+    "再次强调：代码块内的源码文本必须与 diff 完全一致，备注只能追加在行尾，不能插入到代码中间。"
 )
 
 API_CASE_GENERATE_BASE_CONTENT = (
@@ -239,6 +284,51 @@ def ensure_general_ai_analysis_prompt(db: Session) -> None:
     db.commit()
     db.refresh(prompt)
     return _serialize(prompt)
+
+
+def ensure_code_interpretation_prompt(db: Session) -> None:
+    """确保预制「提交代码解读」提示词存在且内容为最新。"""
+    now = datetime.utcnow()
+    prompt = (
+        db.query(PromptTemplate)
+        .filter(PromptTemplate.remark == "code-interpretation", PromptTemplate.is_preset.is_(True))
+        .first()
+    )
+    content = _compose_prompt_content(
+        CODE_INTERPRETATION_BASE_CONTENT,
+        "markdown",
+        CODE_INTERPRETATION_RESPONSE_FORMAT,
+    )
+    extra = {
+        "base_content": CODE_INTERPRETATION_BASE_CONTENT,
+        "response_type": "markdown",
+        "response_format": CODE_INTERPRETATION_RESPONSE_FORMAT,
+    }
+    if prompt:
+        prompt.content = content
+        prompt.extra_data = extra
+        prompt.description = "展示变更代码并逐行备注解读，总结修改前后逻辑差异。"
+        prompt.updated_at = now
+        db.commit()
+        return
+
+    db.add(
+        PromptTemplate(
+            id=_new_id(),
+            prompt_type="代码解读",
+            name="提交代码解读",
+            description="展示变更代码并逐行备注解读，总结修改前后逻辑差异。",
+            content=content,
+            remark="code-interpretation",
+            enabled=True,
+            is_default=True,
+            is_preset=True,
+            extra_data=extra,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db.commit()
 
 
 def update_prompt_template(db: Session, prompt_id: str, payload: dict) -> dict:

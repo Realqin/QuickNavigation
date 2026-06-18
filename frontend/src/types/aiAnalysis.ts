@@ -1,5 +1,8 @@
+import type { CodeInterpretationPayload } from './codeInterpretation';
+
 export interface AiAnalysisResult {
   analysis: string;
+  interpretation?: CodeInterpretationPayload | null;
   model: string;
   prompt_type: string;
   prompt_name: string;
