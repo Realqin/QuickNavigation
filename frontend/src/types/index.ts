@@ -356,6 +356,17 @@ export interface SchemaScanResult {
   message: string;
 }
 
+export interface SchemaResetBaselineResult {
+  subscription_id: number;
+  deleted_logs: number;
+  changes_detected: number;
+  logs_created: number;
+  has_baseline: boolean;
+  database_count: number;
+  table_count: number;
+  message: string;
+}
+
 export const PROJECT_CONNECTION_GROUP_NAME = '项目连接';
 
 export const DICT_TYPE_LABELS: Record<DictType, string> = {

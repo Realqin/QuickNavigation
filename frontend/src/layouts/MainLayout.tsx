@@ -217,6 +217,7 @@ export default function MainLayout() {
               className={`app-tabs${activeTabType === 'home' ? ' app-tabs--home' : ''}`}
               type="editable-card"
               hideAdd
+              animated={{ inkBar: true, tabPane: false }}
               activeKey={activeKey}
               onChange={(key) => setActiveKey(key as PageType)}
               onEdit={(targetKey, action) => {

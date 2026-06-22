@@ -71,8 +71,9 @@
   background: transparent;
   color: #24292f;
   font: inherit;
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .code-interpretation__code--old {
@@ -105,11 +106,13 @@
 
 .code-interpretation__summary-item {
   display: grid;
-  grid-template-columns: 88px 1fr;
+  grid-template-columns: 88px minmax(0, 1fr);
   gap: 8px;
   font-size: 13px;
   line-height: 1.6;
   color: rgba(0, 0, 0, 0.78);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .code-interpretation__summary-label {

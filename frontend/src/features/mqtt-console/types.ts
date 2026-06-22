@@ -3,6 +3,7 @@ export interface MqttMessageRecord {
   topic: string;
   payload: string;
   receivedAt: string;
+  receivedAtMs: number;
   colorIndex: number;
 }
 

@@ -10,7 +10,7 @@ function trimMessages(items: MqttMessageRecord[]): MqttMessageRecord[] {
   if (items.length <= MQTT_MESSAGE_MAX_COUNT) {
     return items;
   }
-  return items.slice(0, MQTT_MESSAGE_MAX_COUNT);
+  return items.slice(-MQTT_MESSAGE_MAX_COUNT);
 }
 
 export function useMqttMessageBuffer() {
@@ -26,7 +26,7 @@ export function useMqttMessageBuffer() {
     const batch = pendingRef.current;
     pendingRef.current = [];
     lastFlushAtRef.current = Date.now();
-    setMessages((prev) => trimMessages(batch.concat(prev)));
+    setMessages((prev) => trimMessages(prev.concat(batch)));
   }, []);
 
   const scheduleFlush = useCallback(() => {
@@ -52,7 +52,7 @@ export function useMqttMessageBuffer() {
 
   const pushMessage = useCallback(
     (record: MqttMessageRecord) => {
-      pendingRef.current.unshift(record);
+      pendingRef.current.push(record);
       if (pendingRef.current.length >= MQTT_MESSAGE_PENDING_MAX) {
         flushPending();
         return;

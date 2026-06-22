@@ -32,6 +32,7 @@ import type {
   RepoAccessSettings,
   SchemaMonitorPingResult,
   SchemaMonitorStatus,
+  SchemaResetBaselineResult,
   SchemaScanResult,
 } from '../types';
 
@@ -467,6 +468,17 @@ export async function pingSchemaMonitor(
 export async function scanSchemaMonitor(subscriptionId: number): Promise<SchemaScanResult> {
   const { data } = await client.post<SchemaScanResult>(
     `/api/subscriptions/${subscriptionId}/schema-scan`,
+    {},
+    { timeout: 120000 },
+  );
+  return data;
+}
+
+export async function resetSchemaMonitorBaseline(
+  subscriptionId: number,
+): Promise<SchemaResetBaselineResult> {
+  const { data } = await client.post<SchemaResetBaselineResult>(
+    `/api/subscriptions/${subscriptionId}/schema-reset-baseline`,
     {},
     { timeout: 120000 },
   );

@@ -1,10 +1,11 @@
 import { ApiOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Button, Col, Form, Input, InputNumber, Modal, Row, Space, Typography, message } from 'antd';
+import { Button, Col, Form, Input, InputNumber, Modal, Popconfirm, Row, Space, Typography, message } from 'antd';
 import type { AxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import {
   fetchSchemaMonitor,
   pingSchemaMonitor,
+  resetSchemaMonitorBaseline,
   scanSchemaMonitor,
   updateSchemaMonitor,
 } from '../api';
@@ -48,19 +49,16 @@ export default function SchemaMonitorModal({
   const [form] = Form.useForm<FormValues>();
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [pinging, setPinging] = useState(false);
   const [status, setStatus] = useState<SchemaMonitorStatus | null>(null);
 
-  const buildConnectionPayload = (values: FormValues, requirePassword: boolean) => {
+  const buildConnectionPayload = (values: FormValues) => {
     const host = values.host.trim();
     const username = values.username.trim();
     const password = values.password.trim();
     if (!host || !username) {
       message.warning('请先填写 IP 和账号');
-      return null;
-    }
-    if (requirePassword && !password && !status?.password_set) {
-      message.warning('请填写数据库密码');
       return null;
     }
     return {
@@ -132,9 +130,6 @@ export default function SchemaMonitorModal({
         payload.username = username;
         if (password) {
           payload.password = password;
-        } else if (!status?.password_set) {
-          message.error('请填写数据库密码');
-          return;
         }
       }
 
@@ -152,7 +147,7 @@ export default function SchemaMonitorModal({
   const handlePing = async () => {
     if (!subscriptionId) return;
     const values = await form.validateFields(['host', 'port', 'username', 'password']);
-    const connection = buildConnectionPayload(values, true);
+    const connection = buildConnectionPayload(values);
     if (!connection) return;
 
     setPinging(true);
@@ -211,6 +206,22 @@ export default function SchemaMonitorModal({
     }
   };
 
+  const handleResetBaseline = async () => {
+    if (!subscriptionId) return;
+    const hide = message.loading('正在清除结构变更日志并重建基准...', 0);
+    setResetting(true);
+    try {
+      const result = await resetSchemaMonitorBaseline(subscriptionId);
+      message.success(result.message);
+      await loadStatus(subscriptionId);
+    } catch (error) {
+      message.error(extractErrorMessage(error, '重置基准失败'));
+    } finally {
+      hide();
+      setResetting(false);
+    }
+  };
+
   return (
     <Modal
       title={`结构巡检 · ${connectionName ?? ''}`}
@@ -229,6 +240,17 @@ export default function SchemaMonitorModal({
           <Button size="small" icon={<ReloadOutlined />} loading={scanning} onClick={handleScan}>
             立即巡检
           </Button>
+          <Popconfirm
+            title="重置结构基准"
+            description="将清除该订阅下所有结构变更日志，并以当前库表结构重新生成基准快照，是否继续？"
+            okText="重置"
+            cancelText="取消"
+            onConfirm={() => handleResetBaseline()}
+          >
+            <Button size="small" danger loading={resetting}>
+              重置基准
+            </Button>
+          </Popconfirm>
           <Button size="small" type="primary" loading={loading} onClick={handleSave}>
             保存
           </Button>
@@ -285,7 +307,7 @@ export default function SchemaMonitorModal({
               name="password"
               label="密码"
               style={compactItem}
-              extra={status?.password_set ? '留空不改' : undefined}
+              extra={status?.password_set ? '留空不改' : '可选，无密码可留空'}
             >
               <Input.Password placeholder="密码" autoComplete="new-password" />
             </Form.Item>

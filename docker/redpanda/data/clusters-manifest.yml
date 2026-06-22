@@ -1,1 +1,17 @@
-clusters: []
+clusters:
+  - id: 38
+    name: "Kafka"
+    brokers:
+      - "10.100.0.211:9092"
+      - "10.100.0.212:9092"
+      - "10.100.0.213:9092"
+    username: ""
+    has_password: false
+  - id: 39
+    name: "Kafka"
+    brokers:
+      - "10.109.0.21:9092"
+      - "10.109.0.22:9092"
+      - "10.109.0.23:9092"
+    username: ""
+    has_password: false

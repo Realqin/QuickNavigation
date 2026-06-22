@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.models import Connection, SchemaSnapshot, Subscription
+from app.models import ActivityLog, Connection, SchemaSnapshot, Subscription
 from app.schemas import (
     ActivityLogOut,
     SchemaMonitorConfigUpdate,
@@ -125,9 +125,7 @@ def resolve_schema_dsn(raw: str, password: str | None = None) -> str:
         return ""
     if _is_navicat_mysql_url(value):
         parsed = parse_navicat_mysql_url(value)
-        pwd = (password or parsed.get("password") or "").strip()
-        if not pwd:
-            raise ValueError("Navicat 连接串不含密码，请在「数据库密码」中填写")
+        pwd = (password if password is not None else parsed.get("password") or "").strip()
         return build_dsn_from_parts(
             host=parsed["host"],
             port=int(parsed["port"]),
@@ -200,7 +198,7 @@ def _connection_monitor_connection(conn: Connection) -> dict[str, Any]:
     password = str(conn.password or "")
     port = int(conn.port or 3306)
 
-    if host and username and password:
+    if host and username:
         return {
             "host": host,
             "port": port,
@@ -246,15 +244,13 @@ def get_schema_monitor_config(sub: Subscription) -> dict[str, Any]:
     if not isinstance(monitor, dict):
         monitor = {}
     connection = _resolve_monitor_connection(monitor)
-    if not (connection["host"] and connection["username"] and connection["password"]) and sub.connection:
+    if not (connection["host"] and connection["username"]) and sub.connection:
         fallback = _connection_monitor_connection(sub.connection)
-        if fallback["host"] and fallback["username"] and fallback["password"]:
+        if fallback["host"] and fallback["username"]:
             connection = fallback
     include = monitor.get("include_databases") or []
     exclude = monitor.get("exclude_databases") or []
-    configured = bool(
-        connection["host"] and connection["username"] and connection["password"]
-    )
+    configured = bool(connection["host"] and connection["username"])
     return {
         "host": connection["host"] or None,
         "port": int(connection["port"] or 3306),
@@ -269,12 +265,12 @@ def get_schema_monitor_config(sub: Subscription) -> dict[str, Any]:
 
 def _build_monitor_dsn(config: dict[str, Any]) -> str:
     if not config.get("connection_configured"):
-        raise ValueError("请先配置数据库 IP、端口、账号和密码")
+        raise ValueError("请先配置数据库 IP、端口和账号")
     return build_dsn_from_parts(
         host=str(config["host"]),
         port=int(config.get("port") or 3306),
         username=str(config["username"]),
-        password=str(config["password"]),
+        password=str(config.get("password") or ""),
     )
 
 
@@ -744,7 +740,7 @@ def scan_subscription_schema(db: Session, sub: Subscription, *, baseline_only: b
         raise ValueError("请先在订阅列表中启用该连接")
     config = get_schema_monitor_config(sub)
     if not config["connection_configured"]:
-        raise ValueError("请先配置数据库 IP、端口、账号和密码")
+        raise ValueError("请先配置数据库 IP、端口和账号")
 
     snapshot_row = (
         db.query(SchemaSnapshot).filter(SchemaSnapshot.subscription_id == sub.id).first()
@@ -801,6 +797,48 @@ async def scan_subscription_schema_async(
     for log in result.get("logs") or []:
         await _broadcast_log(log)
     return result
+
+
+def clear_schema_change_logs(db: Session, subscription_id: int) -> int:
+    rows = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.subscription_id == subscription_id)
+        .all()
+    )
+    deleted = 0
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        if payload.get("event") == "schema_change":
+            db.delete(row)
+            deleted += 1
+    if deleted:
+        db.commit()
+    return deleted
+
+
+async def reset_schema_monitor_baseline(db: Session, sub: Subscription) -> dict[str, Any]:
+    deleted_logs = clear_schema_change_logs(db, sub.id)
+    result = await scan_subscription_schema_async(db, sub, baseline_only=True)
+    snapshot = result.get("snapshot")
+    if isinstance(snapshot, dict):
+        snapshot_data = snapshot.get("snapshot")
+    else:
+        snapshot_data = snapshot.snapshot if snapshot else None
+    table_count = len((snapshot_data or {}).get("tables") or {})
+    database_count = len((snapshot_data or {}).get("databases") or [])
+    return {
+        "subscription_id": sub.id,
+        "deleted_logs": deleted_logs,
+        "changes_detected": 0,
+        "logs_created": 0,
+        "has_baseline": bool(snapshot_data),
+        "database_count": database_count,
+        "table_count": table_count,
+        "message": (
+            f"已清除 {deleted_logs} 条结构变更日志，并重新生成基准快照"
+            f"（{database_count} 库 / {table_count} 表）"
+        ),
+    }
 
 
 def list_schema_monitor_targets(db: Session) -> list[Subscription]:
@@ -887,8 +925,6 @@ def update_schema_monitor_config(
             raise ValueError("请填写数据库 IP")
         if not username:
             raise ValueError("请填写数据库账号")
-        if not password:
-            raise ValueError("请填写数据库密码")
         monitor["host"] = host
         monitor["port"] = port
         monitor["username"] = username
@@ -936,8 +972,6 @@ def _resolve_ping_connection(
         raise ValueError("请填写数据库 IP")
     if not username:
         raise ValueError("请填写数据库账号")
-    if not password:
-        raise ValueError("请填写数据库密码")
     return {"host": host, "port": port, "username": username, "password": password}
 
 
@@ -986,10 +1020,12 @@ def build_dsn_from_parts(
     host: str,
     port: int,
     username: str,
-    password: str,
+    password: str = "",
     database: str | None = None,
 ) -> str:
     user = quote_plus(username)
-    pwd = quote_plus(password)
     db_part = f"/{database}" if database else ""
-    return f"mysql+pymysql://{user}:{pwd}@{host}:{port}{db_part}"
+    if password:
+        pwd = quote_plus(password)
+        return f"mysql+pymysql://{user}:{pwd}@{host}:{port}{db_part}"
+    return f"mysql+pymysql://{user}@{host}:{port}{db_part}"

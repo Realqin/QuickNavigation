@@ -193,13 +193,15 @@ export default function MqttConsole({
   ]);
 
   const pushMessage = (topic: string, payload: string) => {
+    const receivedAtMs = Date.now();
     messageColorRef.current = nextMessageColorIndex(messageColorRef.current);
     messageSeqRef.current += 1;
     pushBufferedMessage({
       id: `m${messageSeqRef.current}`,
       topic,
       payload: formatMessagePayload(payload),
-      receivedAt: new Date().toLocaleString(),
+      receivedAt: new Date(receivedAtMs).toLocaleString(),
+      receivedAtMs,
       colorIndex: messageColorRef.current,
     });
   };
@@ -371,7 +373,7 @@ export default function MqttConsole({
           item.payload.toLowerCase().includes(keyword),
       );
     }
-    return result;
+    return [...result].sort((a, b) => a.receivedAtMs - b.receivedAtMs);
   }, [messages, selectedTopic, filterText]);
 
   useEffect(() => {

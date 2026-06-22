@@ -1,5 +1,5 @@
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Button, Layout, Select, Space, Typography, message } from 'antd';
+import { Button, Select, Space, Typography, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createConnection,
@@ -32,8 +32,6 @@ import { openMqttConsole } from '../utils/mqttNavigation';
 import { openRedpandaInNewTab } from '../utils/redpanda';
 import { openRedisinsightInNewTab } from '../utils/redisinsight';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
-
-const { Content, Sider } = Layout;
 
 const EXPAND_KEY = 'quicknav-collapse';
 const PROJECT_KEY = 'quicknav-project';
@@ -352,9 +350,8 @@ export default function HomePage() {
         </Space>
       </div>
 
-      <div className="home-page__main">
-        <Layout className="home-layout">
-          <Content className="home-content">
+      <div className="home-page__body">
+        <div className="home-page__scroll">
           {groups.map((group, index) => (
             <div key={group.id}>
               {index > 0 ? <div style={{ height: 16 }} /> : null}
@@ -394,11 +391,10 @@ export default function HomePage() {
               />
             </div>
           ))}
-        </Content>
-        <Sider width={300} className="home-log-sider" theme="light">
+        </div>
+        <aside className="home-page__aside">
           <ActivityLogPanel logs={logs} onItemClick={handleLogClick} />
-        </Sider>
-        </Layout>
+        </aside>
       </div>
 
       <ConnectionFormModal

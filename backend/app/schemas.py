@@ -471,6 +471,17 @@ class SchemaScanResultOut(BaseModel):
     message: str
 
 
+class SchemaResetBaselineOut(BaseModel):
+    subscription_id: int
+    deleted_logs: int
+    changes_detected: int = 0
+    logs_created: int = 0
+    has_baseline: bool
+    database_count: int = 0
+    table_count: int = 0
+    message: str
+
+
 class OmnidbMenuUrlOut(BaseModel):
     url: str
 

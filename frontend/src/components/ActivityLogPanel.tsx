@@ -16,18 +16,21 @@ const sourceIcon: Record<string, React.ReactNode> = {
   'api-monitor': <RadarChartOutlined style={{ color: '#61affe' }} />,
 };
 
+const HOME_LOG_DISPLAY_LIMIT = 8;
+
 export default function ActivityLogPanel({ logs, onItemClick }: Props) {
+  const displayLogs = logs.slice(0, HOME_LOG_DISPLAY_LIMIT);
+
   return (
     <div className="log-panel">
       <Typography.Title level={5} style={{ marginTop: 0, flexShrink: 0 }}>
         实时动态
       </Typography.Title>
-      <div className="log-panel__scroll">
-        <List
-          size="small"
-          dataSource={logs}
-          locale={{ emptyText: '暂无动态' }}
-          renderItem={(item) => {
+      <List
+        size="small"
+        dataSource={displayLogs}
+        locale={{ emptyText: '暂无动态' }}
+        renderItem={(item) => {
             const clickable = canOpenActivityLogDetail(item);
             return (
               <List.Item
@@ -66,7 +69,6 @@ export default function ActivityLogPanel({ logs, onItemClick }: Props) {
             );
           }}
         />
-      </div>
     </div>
   );
 }

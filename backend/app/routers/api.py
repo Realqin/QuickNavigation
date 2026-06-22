@@ -81,6 +81,7 @@ from app.schemas import (
     SchemaMonitorOut,
     SchemaMonitorPingOut,
     SchemaMonitorPingRequest,
+    SchemaResetBaselineOut,
     SchemaScanResultOut,
     SubscriptionCreate,
     SubscriptionOut,
@@ -167,6 +168,7 @@ from app.repo_access_service import get_repo_access_settings_out, update_repo_ac
 from app.schema_monitor_service import (
     get_schema_monitor_status,
     ping_schema_monitor_for_subscription,
+    reset_schema_monitor_baseline,
     scan_subscription_schema_async,
     update_schema_monitor_config,
 )
@@ -785,6 +787,26 @@ async def post_subscription_schema_scan(subscription_id: int, db: Session = Depe
         has_baseline=bool(snapshot_data),
         message=message,
     )
+
+
+@router.post(
+    "/subscriptions/{subscription_id}/schema-reset-baseline",
+    response_model=SchemaResetBaselineOut,
+)
+async def post_subscription_schema_reset_baseline(
+    subscription_id: int,
+    db: Session = Depends(get_db),
+):
+    sub = db.query(Subscription).filter(Subscription.id == subscription_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    try:
+        result = await reset_schema_monitor_baseline(db, sub)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"重置结构基准失败: {exc}") from exc
+    return SchemaResetBaselineOut(**result)
 
 
 @router.post("/subscriptions", response_model=SubscriptionOut, status_code=201)
