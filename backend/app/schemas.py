@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -776,6 +776,66 @@ class K8sPodLogOut(BaseModel):
     pod_name: str
     container: str = ""
     logs: str
+
+
+class K8sWatermarkValueOut(BaseModel):
+    raw: str
+    timestamp: int
+    formatted_at: datetime
+    lag_ms: int
+    lag_hours: float
+    delayed: bool = False
+
+
+class K8sWatermarkOperatorOut(BaseModel):
+    job_id: str = ""
+    job_name: str = ""
+    vertex_id: str
+    operator_name: str
+    watermarks: list[K8sWatermarkValueOut] = Field(default_factory=list)
+    error: str = ""
+
+
+class K8sWatermarkOut(BaseModel):
+    cluster_id: int
+    namespace: str
+    service_name: str
+    port: int
+    flink_url: str
+    generated_at: datetime
+    jobs_count: int = 0
+    items: list[K8sWatermarkOperatorOut] = Field(default_factory=list)
+
+
+K8sRestartMonitorOption = Literal["none", "immediate", "5m", "10m"]
+
+
+class K8sAlarmMonitorGroupOut(BaseModel):
+    namespace: str
+    enabled: bool = False
+    service_count: int = 0
+    monitored_service_count: int = 0
+
+
+class K8sAlarmMonitorGroupUpdate(BaseModel):
+    enabled: bool
+
+
+class K8sAlarmMonitorServiceOut(BaseModel):
+    service_name: str
+    restart_monitor: K8sRestartMonitorOption = "none"
+    watermark_minutes: int | None = None
+
+
+class K8sAlarmMonitorServiceUpdate(BaseModel):
+    restart_monitor: K8sRestartMonitorOption = "none"
+    watermark_minutes: int | None = Field(default=None, ge=1, le=10080)
+
+
+class K8sAlarmMonitorSyncOut(BaseModel):
+    groups_count: int = 0
+    services_count: int = 0
+    namespaces: list[str] = Field(default_factory=list)
 
 
 class RedpandaOpenOut(BaseModel):

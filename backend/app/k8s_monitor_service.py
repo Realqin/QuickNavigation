@@ -1,8 +1,9 @@
+import math
 import time
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import HTTPException
@@ -14,6 +15,9 @@ from app.schemas import K8sClusterConfigCreate, K8sClusterConfigUpdate, K8sScale
 
 
 K8S_TIMEOUT = httpx.Timeout(connect=8.0, read=30.0, write=10.0, pool=10.0)
+FLINK_REST_TIMEOUT = httpx.Timeout(connect=6.0, read=20.0, write=10.0, pool=10.0)
+FLINK_WATERMARK_DELAY_MS = 2 * 60 * 60 * 1000
+MAX_WATERMARK_TIMESTAMP_MS = 253402300799999
 KUBESPHERE_TOKEN_TTL_SECONDS = 10 * 60
 _KUBESPHERE_AUTH_CACHE: dict[int, tuple[dict[str, str], float]] = {}
 
@@ -803,6 +807,224 @@ def scale_k8s_workload(cluster: K8sClusterConfig, data: K8sScaleRequest) -> dict
         "workload_name": data.workload_name,
         "replicas": next_replicas,
         "message": f"副本数已调整为 {next_replicas}",
+    }
+
+
+def _node_port_base_url(cluster: K8sClusterConfig, port: int) -> str:
+    try:
+        port_value = int(port)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="外部访问端口不合法") from exc
+    if port_value < 1 or port_value > 65535:
+        raise HTTPException(status_code=400, detail="外部访问端口不合法")
+
+    parsed = urlsplit(cluster.api_server)
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="K8s 集群地址缺少主机名")
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    scheme = parsed.scheme or "http"
+    return f"{scheme}://{host}:{port_value}"
+
+
+def _get_flink_json(cluster: K8sClusterConfig, base_url: str, path: str) -> Any:
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        with httpx.Client(
+            timeout=FLINK_REST_TIMEOUT,
+            verify=bool(cluster.verify_ssl),
+            follow_redirects=True,
+        ) as client:
+            response = client.get(url, headers={"Accept": "application/json"})
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=502, detail=f"无法连接 Flink REST 服务：{base_url}") from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="访问 Flink REST 服务超时") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Flink REST 请求失败：{exc}") from exc
+
+    if not 200 <= response.status_code < 300:
+        preview = _response_preview(response, 300)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Flink REST 返回 {response.status_code}：{preview or response.reason_phrase}",
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        preview = _response_preview(response, 300)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Flink REST 未返回 JSON：{path}；响应预览：{preview or '-'}",
+        ) from exc
+    return payload
+
+
+def _extract_flink_jobs(payload: dict[str, Any]) -> list[dict[str, str]]:
+    jobs_payload = payload.get("jobs")
+    candidates: list[dict[str, Any]] = []
+    if isinstance(jobs_payload, list):
+        candidates.extend(item for item in jobs_payload if isinstance(item, dict))
+    if not candidates:
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                if node.get("jid"):
+                    candidates.append(node)
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(payload)
+
+    jobs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        jid = str(item.get("jid") or item.get("id") or "").strip()
+        if not jid or jid in seen:
+            continue
+        seen.add(jid)
+        jobs.append(
+            {
+                "jid": jid,
+                "name": str(item.get("name") or item.get("job-name") or "").strip(),
+                "state": str(item.get("state") or item.get("status") or "").strip(),
+            }
+        )
+    running = [job for job in jobs if job["state"].upper() == "RUNNING"]
+    return running or jobs
+
+
+def _extract_flink_vertices(payload: dict[str, Any]) -> list[dict[str, str]]:
+    vertices_payload = payload.get("vertices")
+    if not isinstance(vertices_payload, list):
+        return []
+    vertices: list[dict[str, str]] = []
+    for item in vertices_payload:
+        if not isinstance(item, dict):
+            continue
+        vertex_id = str(item.get("id") or "").strip()
+        if not vertex_id:
+            continue
+        vertices.append(
+            {
+                "id": vertex_id,
+                "name": str(item.get("name") or item.get("description") or vertex_id).strip(),
+            }
+        )
+    return vertices
+
+
+def _extract_watermark_candidates(payload: Any) -> list[Any]:
+    result: list[Any] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                normalized_key = key.replace("_", "").replace("-", "").lower()
+                if normalized_key in {"value", "watermark", "lowwatermark"}:
+                    result.append(value)
+                else:
+                    walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return result
+
+
+def _coerce_watermark_timestamp(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    raw_number: float
+    if isinstance(value, (int, float)):
+        raw_number = float(value)
+    else:
+        text = str(value).strip().replace(",", "")
+        if text.lower() in {"", "-", "--", "none", "null", "nan"}:
+            return None
+        try:
+            raw_number = float(text)
+        except ValueError:
+            return None
+    if not math.isfinite(raw_number) or raw_number <= 0:
+        return None
+    if 1_000_000_000 <= raw_number < 10_000_000_000:
+        raw_number *= 1000
+    if raw_number > MAX_WATERMARK_TIMESTAMP_MS:
+        return None
+    return int(raw_number)
+
+
+def _watermark_value_out(raw: Any, timestamp: int, now_ms: int) -> dict[str, Any]:
+    lag_ms = max(0, now_ms - timestamp)
+    return {
+        "raw": str(raw),
+        "timestamp": timestamp,
+        "formatted_at": datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc),
+        "lag_ms": lag_ms,
+        "lag_hours": round(lag_ms / 3600000, 3),
+        "delayed": lag_ms > FLINK_WATERMARK_DELAY_MS,
+    }
+
+
+def read_k8s_service_watermarks(
+    cluster: K8sClusterConfig,
+    *,
+    namespace: str,
+    service_name: str,
+    port: int,
+) -> dict[str, Any]:
+    base_url = _node_port_base_url(cluster, port)
+    overview = _get_flink_json(cluster, base_url, "/jobs/overview")
+    if not isinstance(overview, dict):
+        raise HTTPException(status_code=502, detail="Flink REST 返回格式异常：/jobs/overview")
+    jobs = _extract_flink_jobs(overview)
+    now_ms = int(time.time() * 1000)
+    rows: list[dict[str, Any]] = []
+
+    for job in jobs:
+        job_id = job["jid"]
+        job_name = job.get("name") or ""
+        detail = _get_flink_json(cluster, base_url, f"/jobs/{_q(job_id)}")
+        if not isinstance(detail, dict):
+            raise HTTPException(status_code=502, detail=f"Flink REST 返回格式异常：/jobs/{job_id}")
+        for vertex in _extract_flink_vertices(detail):
+            row = {
+                "job_id": job_id,
+                "job_name": job_name,
+                "vertex_id": vertex["id"],
+                "operator_name": vertex["name"],
+                "watermarks": [],
+                "error": "",
+            }
+            try:
+                watermark_payload = _get_flink_json(
+                    cluster,
+                    base_url,
+                    f"/jobs/{_q(job_id)}/vertices/{_q(vertex['id'])}/watermarks",
+                )
+                for raw_value in _extract_watermark_candidates(watermark_payload):
+                    timestamp = _coerce_watermark_timestamp(raw_value)
+                    if timestamp is None:
+                        continue
+                    row["watermarks"].append(_watermark_value_out(raw_value, timestamp, now_ms))
+            except HTTPException as exc:
+                row["error"] = str(exc.detail)
+            rows.append(row)
+
+    return {
+        "cluster_id": cluster.id,
+        "namespace": namespace,
+        "service_name": service_name,
+        "port": int(port),
+        "flink_url": f"{base_url}/#/overview",
+        "generated_at": datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc),
+        "jobs_count": len(jobs),
+        "items": rows,
     }
 
 

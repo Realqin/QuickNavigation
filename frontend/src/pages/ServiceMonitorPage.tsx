@@ -1,7 +1,9 @@
 import {
+  BellOutlined,
   ApiOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
+  ClockCircleOutlined,
   CloudServerOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -14,6 +16,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import {
+  Alert,
   App,
   Badge,
   Button,
@@ -35,20 +38,51 @@ import {
   connectK8sCluster,
   deleteK8sCluster,
   fetchK8sClusters,
-  fetchK8sPodLogs,
   fetchK8sProjects,
   fetchK8sServices,
+  fetchK8sWatermarks,
   scaleK8sService,
+  syncK8sAlarmMonitor,
 } from '../api';
+import K8sAlarmMonitorPanel from '../components/K8sAlarmMonitorPanel';
 import K8sClusterFormModal from '../components/K8sClusterFormModal';
-import type { K8sClusterConfig, K8sConnectResult, K8sPod, K8sProject, K8sService } from '../types/k8s';
+import K8sPodTerminalModal, { type K8sPodTerminalTarget } from '../components/K8sPodTerminalModal';
+import type {
+  K8sClusterConfig,
+  K8sConnectResult,
+  K8sPod,
+  K8sProject,
+  K8sService,
+  K8sWatermarkOperator,
+  K8sWatermarkResult,
+  K8sWatermarkValue,
+} from '../types/k8s';
 import { formatDateTime } from '../utils/dateTime';
 
 const TABLE_SCROLL_Y = 'calc(100vh - 300px)';
 
-interface LogState {
-  pod: K8sPod;
-  container?: string;
+const WATERMARK_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+interface WatermarkState {
+  service: K8sService;
+  port: number;
+}
+
+interface WatermarkTableRow {
+  rowKey: string;
+  operator: K8sWatermarkOperator;
+  watermark: K8sWatermarkValue | null;
+  isFirst: boolean;
+  rowSpan: number;
 }
 
 type ServiceMonitorRow =
@@ -161,6 +195,65 @@ function renderExternalPorts(
   );
 }
 
+function formatWatermarkTimestamp(timestamp: number) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return '-';
+  }
+  try {
+    return WATERMARK_TIME_FORMATTER.format(new Date(timestamp));
+  } catch {
+    return '-';
+  }
+}
+
+function formatWatermarkLag(value: K8sWatermarkValue) {
+  const lagMs = Math.max(0, value.lag_ms || 0);
+  if (lagMs < 60000) {
+    return `${Math.floor(lagMs / 1000)} 秒`;
+  }
+  const hours = Math.floor(lagMs / 3600000);
+  const minutes = Math.floor((lagMs % 3600000) / 60000);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
+function renderWatermarkCell(
+  watermark: K8sWatermarkValue | null,
+  content: string | number,
+) {
+  if (!watermark) {
+    return '-';
+  }
+  return (
+    <span
+      className={`service-monitor-page__watermark-value${
+        watermark.delayed ? ' is-delayed' : ''
+      }`}
+    >
+      {content}
+    </span>
+  );
+}
+
+function buildWatermarkTableRows(operators: K8sWatermarkOperator[]): WatermarkTableRow[] {
+  const rows: WatermarkTableRow[] = [];
+  operators.forEach((operator) => {
+    const watermarks = operator.watermarks.length ? operator.watermarks : [null];
+    watermarks.forEach((watermark, index) => {
+      rows.push({
+        rowKey: `${operator.job_id}:${operator.vertex_id}:${index}`,
+        operator,
+        watermark,
+        isFirst: index === 0,
+        rowSpan: watermarks.length,
+      });
+    });
+  });
+  return rows;
+}
+
 export default function ServiceMonitorPage() {
   const { message, modal } = App.useApp();
   const [clusters, setClusters] = useState<K8sClusterConfig[]>([]);
@@ -182,9 +275,12 @@ export default function ServiceMonitorPage() {
   const [expandedServiceIds, setExpandedServiceIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [logState, setLogState] = useState<LogState | null>(null);
-  const [logText, setLogText] = useState('');
-  const [logLoading, setLogLoading] = useState(false);
+  const [terminalTarget, setTerminalTarget] = useState<K8sPodTerminalTarget | null>(null);
+  const [alarmMonitorOpen, setAlarmMonitorOpen] = useState(false);
+  const [watermarkState, setWatermarkState] = useState<WatermarkState | null>(null);
+  const [watermarkData, setWatermarkData] = useState<K8sWatermarkResult | null>(null);
+  const [watermarkLoading, setWatermarkLoading] = useState(false);
+  const [watermarkError, setWatermarkError] = useState('');
 
   const selectedCluster = useMemo(
     () => clusters.find((item) => item.id === selectedId) ?? null,
@@ -202,7 +298,18 @@ export default function ServiceMonitorPage() {
     setSelectedProject(undefined);
     setServices([]);
     setKeyword('');
+    setWatermarkState(null);
+    setWatermarkData(null);
+    setWatermarkError('');
   }, []);
+
+  const syncAlarmMonitorData = useCallback(async (clusterId: number) => {
+    try {
+      await syncK8sAlarmMonitor(clusterId);
+    } catch (error) {
+      message.error(getErrorMessage(error, '同步报警监控数据失败'));
+    }
+  }, [message]);
 
   const loadClusters = useCallback(async () => {
     setClustersLoading(true);
@@ -286,6 +393,12 @@ export default function ServiceMonitorPage() {
   useEffect(() => {
     loadClusters();
   }, [loadClusters]);
+
+  useEffect(() => {
+    if (connectedId) {
+      syncAlarmMonitorData(connectedId).catch(() => undefined);
+    }
+  }, [connectedId, syncAlarmMonitorData]);
 
   const handleConnect = async () => {
     if (!selectedCluster) {
@@ -371,29 +484,47 @@ export default function ServiceMonitorPage() {
     }
   };
 
-  const openLogs = async (pod: K8sPod, container?: string) => {
+  const openTerminal = (pod: K8sPod, container?: string) => {
     if (!connectedId) {
       return;
     }
     const nextContainer = container || pod.containers[0]?.name;
-    setLogState({ pod, container: nextContainer });
-    setLogText('');
-    setLogLoading(true);
-    try {
-      const result = await fetchK8sPodLogs({
-        clusterId: connectedId,
-        namespace: pod.namespace,
-        podName: pod.name,
-        container: nextContainer,
-        tailLines: 800,
-      });
-      setLogText(result.logs || '暂无日志');
-    } catch (error) {
-      setLogText(getErrorMessage(error, '加载日志失败'));
-    } finally {
-      setLogLoading(false);
-    }
+    setTerminalTarget({
+      namespace: pod.namespace,
+      podName: pod.name,
+      container: nextContainer,
+    });
   };
+
+  const openWatermarks = useCallback(
+    async (service: K8sService) => {
+      if (!connectedId) {
+        return;
+      }
+      const port = service.external_ports[0];
+      if (!port) {
+        return;
+      }
+      setWatermarkState({ service, port });
+      setWatermarkData(null);
+      setWatermarkError('');
+      setWatermarkLoading(true);
+      try {
+        const result = await fetchK8sWatermarks({
+          clusterId: connectedId,
+          namespace: service.namespace,
+          serviceName: service.service_name,
+          port,
+        });
+        setWatermarkData(result);
+      } catch (error) {
+        setWatermarkError(getErrorMessage(error, '加载 Watermark 数据失败'));
+      } finally {
+        setWatermarkLoading(false);
+      }
+    },
+    [connectedId],
+  );
 
   const filteredServices = useMemo(() => {
     const text = keyword.trim().toLowerCase();
@@ -465,6 +596,60 @@ export default function ServiceMonitorPage() {
       return next;
     });
   };
+
+  const watermarkTableRows = useMemo(
+    () => buildWatermarkTableRows(watermarkData?.items ?? []),
+    [watermarkData],
+  );
+
+  const watermarkColumns = useMemo<TableColumnsType<WatermarkTableRow>>(
+    () => [
+      {
+        title: '算子名称',
+        width: 300,
+        onCell: (row) => (row.isFirst ? { rowSpan: row.rowSpan } : { rowSpan: 0 }),
+        render: (_, row) =>
+          row.isFirst ? (
+            <div className="service-monitor-page__watermark-operator">
+              <Typography.Text strong>
+                {row.operator.operator_name || row.operator.vertex_id}
+              </Typography.Text>
+              {row.operator.job_name ? (
+                <Typography.Text type="secondary">{row.operator.job_name}</Typography.Text>
+              ) : null}
+              {row.operator.error ? (
+                <Typography.Text type="danger">{row.operator.error}</Typography.Text>
+              ) : null}
+            </div>
+          ) : null,
+      },
+      {
+        title: '所有 Watermark 时间戳',
+        width: 280,
+        render: (_, row) =>
+          renderWatermarkCell(row.watermark, row.watermark?.raw || row.watermark?.timestamp || '-'),
+      },
+      {
+        title: '转换后的时间点',
+        width: 280,
+        render: (_, row) =>
+          renderWatermarkCell(
+            row.watermark,
+            row.watermark ? formatWatermarkTimestamp(row.watermark.timestamp) : '-',
+          ),
+      },
+      {
+        title: '与当前时间相比',
+        width: 200,
+        render: (_, row) =>
+          renderWatermarkCell(
+            row.watermark,
+            row.watermark ? formatWatermarkLag(row.watermark) : '-',
+          ),
+      },
+    ],
+    [],
+  );
 
   const serviceColumns = useMemo<TableColumnsType<ServiceMonitorRow>>(
     () => [
@@ -581,7 +766,7 @@ export default function ServiceMonitorPage() {
       },
       {
         title: '操作',
-        width: 240,
+        width: 320,
         fixed: 'right',
         render: (_, row) => {
           if (row.kind === 'pod') {
@@ -592,7 +777,7 @@ export default function ServiceMonitorPage() {
                     key={container.name}
                     size="small"
                     icon={<FileTextOutlined />}
-                    onClick={() => openLogs(row.pod, container.name)}
+                    onClick={() => openTerminal(row.pod, container.name)}
                   >
                     {container.name}
                   </Button>
@@ -604,8 +789,10 @@ export default function ServiceMonitorPage() {
           const { service } = row;
           const increaseKey = `${service.id}:1`;
           const decreaseKey = `${service.id}:-1`;
+          const watermarkButtonLoading =
+            watermarkLoading && watermarkState?.service.id === service.id;
           return (
-            <Space size={4}>
+            <Space size={[4, 4]} wrap>
               <Button
                 size="small"
                 icon={<FileTextOutlined />}
@@ -613,12 +800,24 @@ export default function ServiceMonitorPage() {
                 onClick={() => {
                   const pod = service.pods[0];
                   if (pod) {
-                    openLogs(pod);
+                    openTerminal(pod);
                   }
                 }}
               >
-                日志
+                终端
               </Button>
+              {service.external_ports.length ? (
+                <Button
+                  size="small"
+                  icon={<ClockCircleOutlined />}
+                  loading={watermarkButtonLoading}
+                  onClick={() => {
+                    openWatermarks(service).catch(() => undefined);
+                  }}
+                >
+                  Watermark
+                </Button>
+              ) : null}
               <Tooltip title={service.scalable ? '副本数 +1' : '未找到可扩缩容工作负载'}>
                 <Button
                   size="small"
@@ -642,7 +841,7 @@ export default function ServiceMonitorPage() {
         },
       },
     ],
-    [connectedCluster, expandedServiceIds, operationKeys],
+    [connectedCluster, expandedServiceIds, openWatermarks, operationKeys, watermarkLoading, watermarkState],
   );
 
   return (
@@ -708,9 +907,10 @@ export default function ServiceMonitorPage() {
               const selected = selectedId === cluster.id;
               const connected = connectedId === cluster.id;
               return (
-                <button
+                <div
                   key={cluster.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className={`service-monitor-page__cluster-item${
                     selected ? ' is-selected' : ''
                   }${connected ? ' is-connected' : ''}`}
@@ -718,6 +918,15 @@ export default function ServiceMonitorPage() {
                     setSelectedId(cluster.id);
                     if (connectedId !== cluster.id) {
                       clearRuntimeData();
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedId(cluster.id);
+                      if (connectedId !== cluster.id) {
+                        clearRuntimeData();
+                      }
                     }
                   }}
                 >
@@ -760,7 +969,7 @@ export default function ServiceMonitorPage() {
                       }}
                     />
                   </span>
-                </button>
+                </div>
               );
             })
           )}
@@ -818,6 +1027,13 @@ export default function ServiceMonitorPage() {
                   style={{ width: 280 }}
                 />
                 <Button
+                  icon={<BellOutlined />}
+                  disabled={!connectedId}
+                  onClick={() => setAlarmMonitorOpen(true)}
+                >
+                  报警监控
+                </Button>
+                <Button
                   icon={<ReloadOutlined />}
                   loading={projectLoading || servicesLoading}
                   onClick={() => {
@@ -836,7 +1052,7 @@ export default function ServiceMonitorPage() {
               columns={serviceColumns}
               loading={servicesLoading}
               pagination={false}
-              scroll={{ x: 1660, y: TABLE_SCROLL_Y }}
+              scroll={{ x: 1740, y: TABLE_SCROLL_Y }}
               rowClassName={(row) =>
                 row.kind === 'pod' ? 'service-monitor-page__row--pod' : ''
               }
@@ -871,27 +1087,74 @@ export default function ServiceMonitorPage() {
         onSaved={handleSaved}
       />
 
+      <K8sAlarmMonitorPanel
+        open={alarmMonitorOpen}
+        clusterId={connectedId}
+        onClose={() => setAlarmMonitorOpen(false)}
+      />
+
+      <K8sPodTerminalModal
+        open={Boolean(terminalTarget)}
+        clusterId={connectedId}
+        target={terminalTarget}
+        onClose={() => setTerminalTarget(null)}
+      />
+
       <Modal
         title={
-          logState
-            ? `${logState.pod.name}${logState.container ? ` / ${logState.container}` : ''}`
-            : '容器日志'
+          watermarkState
+            ? `Watermark / ${watermarkState.service.service_name}:${watermarkState.port}`
+            : 'Watermark'
         }
-        open={Boolean(logState)}
+        open={Boolean(watermarkState)}
         onCancel={() => {
-          setLogState(null);
-          setLogText('');
+          setWatermarkState(null);
+          setWatermarkData(null);
+          setWatermarkError('');
         }}
         footer={null}
-        width={960}
+        width={1120}
         destroyOnHidden
       >
-        {logLoading ? (
+        {watermarkLoading ? (
           <div className="service-monitor-page__log-loading">
             <Spin />
           </div>
+        ) : watermarkError ? (
+          <Alert type="error" showIcon message="加载 Watermark 数据失败" description={watermarkError} />
         ) : (
-          <pre className="service-monitor-page__log">{logText || '暂无日志'}</pre>
+          <>
+            {watermarkData ? (
+              <div className="service-monitor-page__watermark-meta">
+                <Space size={[6, 6]} wrap>
+                  <Tag>{watermarkData.jobs_count} 个任务</Tag>
+                  <Tag>{watermarkData.items.length} 个算子</Tag>
+                  <Tag>端口 {watermarkData.port}</Tag>
+                  {formatDateTime(watermarkData.generated_at) ? (
+                    <Tag>{formatDateTime(watermarkData.generated_at)}</Tag>
+                  ) : null}
+                  {watermarkData.flink_url ? (
+                    <a href={watermarkData.flink_url} target="_blank" rel="noreferrer">
+                      打开 Flink
+                    </a>
+                  ) : null}
+                </Space>
+              </div>
+            ) : null}
+            <Table<WatermarkTableRow>
+              rowKey="rowKey"
+              className="service-monitor-page__watermark-table"
+              dataSource={watermarkTableRows}
+              columns={watermarkColumns}
+              pagination={false}
+              size="small"
+              scroll={{ x: 1060, y: 'min(56vh, 560px)' }}
+              rowClassName={(row) =>
+                row.watermark?.delayed ? 'service-monitor-page__watermark-row--delayed' : ''
+              }
+              locale={{ emptyText: '暂无 Watermark 数据' }}
+            />
+          </>
         )}
       </Modal>
     </div>

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy import inspect, text
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -29,6 +29,8 @@ from app.services import (
     PROJECT_CONNECTION_GROUP_NAME,
     connection_is_mqtt_type,
 )
+from app.k8s_exec_service import run_k8s_exec_bridge
+from app.k8s_monitor_service import get_k8s_cluster
 from app.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -835,6 +837,41 @@ async def websocket_mqtt_manual_bridge(websocket: WebSocket):
         bridge_id="manual",
         accept_websocket=False,
     )
+
+
+@app.websocket("/ws/k8s/clusters/{cluster_id}/exec")
+async def websocket_k8s_exec(websocket: WebSocket, cluster_id: int):
+    await websocket.accept()
+    namespace = (websocket.query_params.get("namespace") or "").strip()
+    pod_name = (websocket.query_params.get("pod_name") or "").strip()
+    container = (websocket.query_params.get("container") or "").strip() or None
+    db = SessionLocal()
+    try:
+        try:
+            cluster = get_k8s_cluster(db, cluster_id)
+        except HTTPException as exc:
+            await websocket.send_json(
+                {"type": "status", "status": "error", "message": str(exc.detail)},
+            )
+            await websocket.close(code=4404)
+            return
+        await run_k8s_exec_bridge(
+            websocket,
+            cluster,
+            namespace=namespace,
+            pod_name=pod_name,
+            container=container,
+        )
+    except Exception as exc:
+        logger.exception("k8s exec websocket failed")
+        try:
+            await websocket.send_json(
+                {"type": "status", "status": "error", "message": f"终端连接失败：{exc}"},
+            )
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 
 @app.websocket("/ws/mqtt/{connection_id}")

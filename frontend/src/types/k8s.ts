@@ -104,3 +104,67 @@ export interface K8sPodLogResult {
   container: string;
   logs: string;
 }
+
+export interface K8sWatermarkValue {
+  raw: string;
+  timestamp: number;
+  formatted_at: string;
+  lag_ms: number;
+  lag_hours: number;
+  delayed: boolean;
+}
+
+export interface K8sWatermarkOperator {
+  job_id: string;
+  job_name: string;
+  vertex_id: string;
+  operator_name: string;
+  watermarks: K8sWatermarkValue[];
+  error?: string;
+}
+
+export interface K8sWatermarkResult {
+  cluster_id: number;
+  namespace: string;
+  service_name: string;
+  port: number;
+  flink_url: string;
+  generated_at: string;
+  jobs_count: number;
+  items: K8sWatermarkOperator[];
+}
+
+export type K8sRestartMonitorOption = 'none' | 'immediate' | '5m' | '10m';
+
+export interface K8sAlarmMonitorGroup {
+  namespace: string;
+  enabled: boolean;
+  service_count: number;
+  monitored_service_count: number;
+}
+
+export interface K8sAlarmMonitorService {
+  service_name: string;
+  restart_monitor: K8sRestartMonitorOption;
+  watermark_minutes: number | null;
+}
+
+export interface K8sAlarmMonitorSyncResult {
+  groups_count: number;
+  services_count: number;
+  namespaces: string[];
+}
+
+export const K8S_RESTART_MONITOR_OPTIONS: Array<{
+  value: K8sRestartMonitorOption;
+  label: string;
+}> = [
+  { value: 'none', label: '无' },
+  { value: 'immediate', label: '立即' },
+  { value: '5m', label: '5分钟内' },
+  { value: '10m', label: '10分钟内' },
+];
+
+export function getRestartMonitorLabel(value: K8sRestartMonitorOption | string) {
+  return K8S_RESTART_MONITOR_OPTIONS.find((item) => item.value === value)?.label || '无';
+}

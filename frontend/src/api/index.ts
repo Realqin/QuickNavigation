@@ -44,6 +44,11 @@ import type {
   K8sScalePayload,
   K8sScaleResult,
   K8sService,
+  K8sWatermarkResult,
+  K8sAlarmMonitorGroup,
+  K8sAlarmMonitorService,
+  K8sAlarmMonitorSyncResult,
+  K8sRestartMonitorOption,
 } from '../types/k8s';
 
 const client = axios.create({
@@ -139,6 +144,94 @@ export async function fetchK8sPodLogs(params: {
       },
       timeout: 60000,
     },
+  );
+  return data;
+}
+
+export async function fetchK8sWatermarks(params: {
+  clusterId: number;
+  namespace: string;
+  serviceName: string;
+  port: number;
+}): Promise<K8sWatermarkResult> {
+  const { data } = await client.get<K8sWatermarkResult>(
+    `/api/k8s/clusters/${params.clusterId}/watermarks`,
+    {
+      params: {
+        namespace: params.namespace,
+        service_name: params.serviceName,
+        port: params.port,
+      },
+      timeout: 60000,
+    },
+  );
+  return data;
+}
+
+export async function syncK8sAlarmMonitor(clusterId: number): Promise<K8sAlarmMonitorSyncResult> {
+  const { data } = await client.post<K8sAlarmMonitorSyncResult>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/sync`,
+    null,
+    { timeout: 600000 },
+  );
+  return data;
+}
+
+export async function syncK8sAlarmMonitorGroup(
+  clusterId: number,
+  namespace: string,
+): Promise<K8sAlarmMonitorSyncResult> {
+  const { data } = await client.post<K8sAlarmMonitorSyncResult>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/groups/${encodeURIComponent(namespace)}/sync`,
+    null,
+    { timeout: 300000 },
+  );
+  return data;
+}
+
+export async function fetchK8sAlarmMonitorGroups(clusterId: number): Promise<K8sAlarmMonitorGroup[]> {
+  const { data } = await client.get<K8sAlarmMonitorGroup[]>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/groups`,
+    { timeout: 60000 },
+  );
+  return data;
+}
+
+export async function updateK8sAlarmMonitorGroup(
+  clusterId: number,
+  namespace: string,
+  enabled: boolean,
+): Promise<K8sAlarmMonitorGroup> {
+  const { data } = await client.put<K8sAlarmMonitorGroup>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/groups/${encodeURIComponent(namespace)}`,
+    { enabled },
+  );
+  return data;
+}
+
+export async function fetchK8sAlarmMonitorServices(
+  clusterId: number,
+  namespace: string,
+): Promise<K8sAlarmMonitorService[]> {
+  const { data } = await client.get<K8sAlarmMonitorService[]>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/groups/${encodeURIComponent(namespace)}/services`,
+    { timeout: 60000 },
+  );
+  return data;
+}
+
+export async function saveK8sAlarmMonitorService(
+  clusterId: number,
+  namespace: string,
+  serviceName: string,
+  payload: {
+    restart_monitor: K8sRestartMonitorOption;
+    watermark_minutes: number | null;
+  },
+): Promise<K8sAlarmMonitorService> {
+  const { data } = await client.put<K8sAlarmMonitorService>(
+    `/api/k8s/clusters/${clusterId}/alarm-monitor/groups/${encodeURIComponent(namespace)}/services/${encodeURIComponent(serviceName)}`,
+    payload,
   );
   return data;
 }

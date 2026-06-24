@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -291,6 +291,60 @@ class K8sClusterConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    alarm_monitor_groups: Mapped[list["K8sAlarmMonitorGroup"]] = relationship(
+        back_populates="cluster", cascade="all, delete-orphan"
+    )
+    alarm_monitor_services: Mapped[list["K8sAlarmMonitorService"]] = relationship(
+        back_populates="cluster", cascade="all, delete-orphan"
+    )
+
+
+class K8sAlarmMonitorGroup(Base):
+    __tablename__ = "k8s_alarm_monitor_groups"
+    __table_args__ = (
+        UniqueConstraint("cluster_id", "namespace", name="uq_k8s_alarm_monitor_group"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cluster_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("k8s_cluster_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    namespace: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    cluster: Mapped["K8sClusterConfig"] = relationship(back_populates="alarm_monitor_groups")
+
+
+class K8sAlarmMonitorService(Base):
+    __tablename__ = "k8s_alarm_monitor_services"
+    __table_args__ = (
+        UniqueConstraint(
+            "cluster_id",
+            "namespace",
+            "service_name",
+            name="uq_k8s_alarm_monitor_service",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cluster_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("k8s_cluster_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    namespace: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    service_name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    restart_monitor: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    watermark_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    cluster: Mapped["K8sClusterConfig"] = relationship(back_populates="alarm_monitor_services")
 
 
 class EmbedConsoleSession(Base):

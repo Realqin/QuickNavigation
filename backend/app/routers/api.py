@@ -59,6 +59,11 @@ from app.schemas import (
     KafkaConsoleConnectionOut,
     KafkaConsoleConnectionTestRequest,
     KafkaConsoleConnectionUpdate,
+    K8sAlarmMonitorGroupOut,
+    K8sAlarmMonitorGroupUpdate,
+    K8sAlarmMonitorServiceOut,
+    K8sAlarmMonitorServiceUpdate,
+    K8sAlarmMonitorSyncOut,
     K8sClusterConfigCreate,
     K8sClusterConfigOut,
     K8sClusterConfigUpdate,
@@ -68,6 +73,7 @@ from app.schemas import (
     K8sScaleOut,
     K8sScaleRequest,
     K8sServiceOut,
+    K8sWatermarkOut,
     MqttConsoleConfigOut,
     MqttConsoleConnectOut,
     MqttConsoleConnectionCreate,
@@ -122,6 +128,13 @@ from app.kafka_console_service import (
     test_kafka_console_connection,
     update_kafka_console_connection,
 )
+from app.k8s_alarm_monitor_service import (
+    list_alarm_monitor_groups,
+    list_alarm_monitor_services,
+    sync_alarm_monitor_data,
+    update_alarm_monitor_group,
+    update_alarm_monitor_service,
+)
 from app.k8s_monitor_service import (
     create_k8s_cluster,
     delete_k8s_cluster,
@@ -130,6 +143,7 @@ from app.k8s_monitor_service import (
     list_k8s_projects,
     list_k8s_services,
     read_k8s_pod_logs,
+    read_k8s_service_watermarks,
     scale_k8s_workload,
     test_k8s_cluster_connection,
     update_k8s_cluster,
@@ -509,6 +523,23 @@ def post_k8s_cluster_scale(
     return scale_k8s_workload(cluster, data)
 
 
+@router.get("/k8s/clusters/{cluster_id}/watermarks", response_model=K8sWatermarkOut)
+def get_k8s_service_watermarks(
+    cluster_id: int,
+    namespace: str = Query(..., min_length=1),
+    service_name: str = Query(..., min_length=1),
+    port: int = Query(..., ge=1, le=65535),
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return read_k8s_service_watermarks(
+        cluster,
+        namespace=namespace,
+        service_name=service_name,
+        port=port,
+    )
+
+
 @router.get("/k8s/clusters/{cluster_id}/logs", response_model=K8sPodLogOut)
 def get_k8s_pod_logs(
     cluster_id: int,
@@ -526,6 +557,79 @@ def get_k8s_pod_logs(
         container=container,
         tail_lines=tail_lines,
     )
+
+
+@router.post(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/sync",
+    response_model=K8sAlarmMonitorSyncOut,
+)
+def post_k8s_alarm_monitor_sync(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return sync_alarm_monitor_data(db, cluster)
+
+
+@router.get(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/groups",
+    response_model=list[K8sAlarmMonitorGroupOut],
+)
+def get_k8s_alarm_monitor_groups(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return list_alarm_monitor_groups(db, cluster)
+
+
+@router.put(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/groups/{namespace}",
+    response_model=K8sAlarmMonitorGroupOut,
+)
+def put_k8s_alarm_monitor_group(
+    cluster_id: int,
+    namespace: str,
+    data: K8sAlarmMonitorGroupUpdate,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return update_alarm_monitor_group(db, cluster, namespace, data)
+
+
+@router.post(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/groups/{namespace}/sync",
+    response_model=K8sAlarmMonitorSyncOut,
+)
+def post_k8s_alarm_monitor_group_sync(
+    cluster_id: int,
+    namespace: str,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return sync_alarm_monitor_data(db, cluster, namespace=namespace)
+
+
+@router.get(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/groups/{namespace}/services",
+    response_model=list[K8sAlarmMonitorServiceOut],
+)
+def get_k8s_alarm_monitor_services(
+    cluster_id: int,
+    namespace: str,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return list_alarm_monitor_services(db, cluster, namespace)
+
+
+@router.put(
+    "/k8s/clusters/{cluster_id}/alarm-monitor/groups/{namespace}/services/{service_name}",
+    response_model=K8sAlarmMonitorServiceOut,
+)
+def put_k8s_alarm_monitor_service(
+    cluster_id: int,
+    namespace: str,
+    service_name: str,
+    data: K8sAlarmMonitorServiceUpdate,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return update_alarm_monitor_service(db, cluster, namespace, service_name, data)
 
 
 @router.get("/kafka-console/connections", response_model=list[KafkaConsoleConnectionOut])
