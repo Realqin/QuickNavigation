@@ -603,6 +603,181 @@ class MqttConsoleConnectOut(BaseModel):
     subscriptions: list[MqttSubscriptionItem] = Field(default_factory=list)
 
 
+class K8sClusterConfigBase(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    api_server: str = Field(min_length=1, max_length=512)
+    provider: str = Field(default="native", max_length=32)
+    auth_type: str = Field(default="password", max_length=16)
+    username: str | None = Field(default=None, max_length=128)
+    verify_ssl: bool = False
+
+    @field_validator("api_server")
+    @classmethod
+    def normalize_api_server(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("集群地址不能为空")
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        text = (value or "native").strip().lower()
+        allowed = {"native", "kubesphere", "kuboard"}
+        if text not in allowed:
+            raise ValueError(f"provider 必须是 {', '.join(sorted(allowed))}")
+        return text
+
+    @field_validator("auth_type")
+    @classmethod
+    def validate_auth_type(cls, value: str) -> str:
+        text = (value or "password").strip().lower()
+        allowed = {"password", "token"}
+        if text not in allowed:
+            raise ValueError(f"auth_type 必须是 {', '.join(sorted(allowed))}")
+        return text
+
+
+class K8sClusterConfigCreate(K8sClusterConfigBase):
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class K8sClusterConfigUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    api_server: str | None = Field(default=None, min_length=1, max_length=512)
+    provider: str | None = Field(default=None, max_length=32)
+    auth_type: str | None = Field(default=None, max_length=16)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=1024)
+    verify_ssl: bool | None = None
+
+    @field_validator("api_server")
+    @classmethod
+    def normalize_api_server(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        text = value.strip()
+        if not text:
+            raise ValueError("集群地址不能为空")
+        if not text.startswith(("http://", "https://")):
+            text = f"https://{text}"
+        return text.rstrip("/")
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        text = (value or "native").strip().lower()
+        allowed = {"native", "kubesphere", "kuboard"}
+        if text not in allowed:
+            raise ValueError(f"provider 必须是 {', '.join(sorted(allowed))}")
+        return text
+
+    @field_validator("auth_type")
+    @classmethod
+    def validate_auth_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        text = (value or "password").strip().lower()
+        allowed = {"password", "token"}
+        if text not in allowed:
+            raise ValueError(f"auth_type 必须是 {', '.join(sorted(allowed))}")
+        return text
+
+
+class K8sClusterConfigOut(K8sClusterConfigBase):
+    id: int
+    password_set: bool = False
+    sort_order: int = 0
+    last_connected_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class K8sConnectOut(BaseModel):
+    ok: bool
+    message: str
+    cluster_id: int
+    version: str = ""
+    namespace_count: int = 0
+    latency_ms: float | None = None
+
+
+class K8sProjectOut(BaseModel):
+    name: str
+    status: str = ""
+    created_at: datetime | None = None
+
+
+class K8sContainerOut(BaseModel):
+    name: str
+    image: str = ""
+    ready: bool = False
+    restart_count: int = 0
+
+
+class K8sPodOut(BaseModel):
+    name: str
+    namespace: str
+    status: str = ""
+    phase: str = ""
+    node: str = ""
+    pod_ip: str = ""
+    host_ip: str = ""
+    containers: list[K8sContainerOut] = Field(default_factory=list)
+    restart_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class K8sServiceOut(BaseModel):
+    id: str
+    project: str
+    namespace: str
+    service_name: str
+    service_type: str = ""
+    cluster_ip: str = ""
+    ports: list[str] = Field(default_factory=list)
+    external_ports: list[int] = Field(default_factory=list)
+    workload_kind: str | None = None
+    workload_name: str | None = None
+    status: str = ""
+    ready_replicas: int = 0
+    replicas: int = 0
+    nodes: list[str] = Field(default_factory=list)
+    pod_ips: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+    pods: list[K8sPodOut] = Field(default_factory=list)
+    scalable: bool = False
+
+
+class K8sScaleRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=253)
+    workload_kind: str = Field(min_length=1, max_length=32)
+    workload_name: str = Field(min_length=1, max_length=253)
+    delta: int = Field(ge=-50, le=50)
+
+
+class K8sScaleOut(BaseModel):
+    namespace: str
+    workload_kind: str
+    workload_name: str
+    replicas: int
+    message: str
+
+
+class K8sPodLogOut(BaseModel):
+    namespace: str
+    pod_name: str
+    container: str = ""
+    logs: str
+
+
 class RedpandaOpenOut(BaseModel):
     embed_url: str
     connection_name: str

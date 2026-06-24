@@ -1404,6 +1404,324 @@ html:has(.embedded-console-page--standalone) body {
 }
 
 
+/* ---- Service Monitor page ---- */
+
+.service-monitor-page {
+  display: flex;
+  position: relative;
+  height: calc(100vh - 56px - 46px);
+  min-height: 0;
+  background: #fff;
+}
+
+.service-monitor-page__sidebar {
+  width: 306px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid #e5e7eb;
+  background: #fafafa;
+  overflow: hidden;
+  transition: width 0.2s ease, opacity 0.2s ease;
+}
+
+.service-monitor-page--sidebar-collapsed .service-monitor-page__sidebar {
+  width: 0;
+  opacity: 0;
+  border-right: none;
+  pointer-events: none;
+}
+
+.service-monitor-page__sidebar-expand {
+  position: absolute;
+  top: 10px;
+  left: 8px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fafafa;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.service-monitor-page__sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
+}
+
+.service-monitor-page__toolbar {
+  padding: 0 12px 10px;
+}
+
+.service-monitor-page__cluster-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 12px;
+}
+
+.service-monitor-page__loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.service-monitor-page__cluster-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.service-monitor-page__cluster-item:hover {
+  background: #f0f5ff;
+}
+
+.service-monitor-page__cluster-item.is-selected {
+  background: #e6f4ff;
+}
+
+.service-monitor-page__cluster-status {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.service-monitor-page__cluster-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.service-monitor-page__cluster-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.service-monitor-page__cluster-tags .ant-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+}
+
+.service-monitor-page__cluster-actions {
+  display: flex;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.service-monitor-page__cluster-item:hover .service-monitor-page__cluster-actions,
+.service-monitor-page__cluster-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.service-monitor-page__cluster-actions .ant-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.service-monitor-page__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  overflow: hidden;
+}
+
+.service-monitor-page__main-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  flex-wrap: wrap;
+}
+
+.service-monitor-page__main-title {
+  min-width: 220px;
+}
+
+.service-monitor-page__main-title .ant-typography {
+  margin: 0 0 4px;
+}
+
+.service-monitor-page__placeholder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fb;
+}
+
+.service-monitor-page__table {
+  flex: 1;
+  min-height: 0;
+}
+
+.service-monitor-page__table .ant-table-thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.service-monitor-page__pagination {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 18px 14px;
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
+.service-monitor-page__row--pod > td {
+  background: #fafbfc;
+}
+
+.service-monitor-page__row--pod:hover > td {
+  background: #f3f7fb !important;
+}
+
+.service-monitor-page__service-name,
+.service-monitor-page__pod-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.service-monitor-page__expand-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.service-monitor-page__expand-placeholder {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+}
+
+.service-monitor-page__pod-indent {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 34px;
+}
+
+.service-monitor-page__service-icon {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.service-monitor-page__service-icon::before,
+.service-monitor-page__service-icon::after {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: #475569;
+}
+
+.service-monitor-page__service-icon::before {
+  right: 0;
+  top: 0;
+  opacity: 0.35;
+}
+
+.service-monitor-page__service-icon::after {
+  left: 0;
+  bottom: 0;
+}
+
+.service-monitor-page__service-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.service-monitor-page__service-meta .ant-tag {
+  margin-inline-end: 0;
+}
+
+.service-monitor-page__service-link {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.service-monitor-page__service-link .ant-typography {
+  color: #1677ff;
+}
+
+.service-monitor-page__service-link:hover .ant-typography {
+  text-decoration: underline;
+}
+
+.service-monitor-page__pod-name > .anticon {
+  flex-shrink: 0;
+  font-size: 24px;
+  color: #475569;
+}
+
+.service-monitor-page__pod-name > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.service-monitor-page__pod-table {
+  margin: 8px 0;
+}
+
+.service-monitor-page__log-loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.service-monitor-page__log {
+  max-height: min(64vh, 720px);
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+
 
 /* ---- Tab page common ---- */
 

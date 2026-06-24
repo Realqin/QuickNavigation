@@ -27,6 +27,7 @@ import HomePage from '../pages/HomePage';
 import LogsPage from '../pages/LogsPage';
 import ApiMonitorPage from '../pages/ApiMonitorPage';
 import ApiCasePage from '../pages/ApiCasePage';
+import ServiceMonitorPage from '../pages/ServiceMonitorPage';
 import LlmConfigPage from '../pages/LlmConfigPage';
 import PromptManagePage from '../pages/PromptManagePage';
 import {
@@ -59,6 +60,7 @@ const MENU_ITEMS: MenuProps['items'] = [
   },
   { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
   { key: 'apiMonitor', icon: <RadarChartOutlined />, label: PAGE_LABELS.apiMonitor },
+  { key: 'serviceMonitor', icon: <CloudServerOutlined />, label: PAGE_LABELS.serviceMonitor },
   { key: 'apiCases', icon: <ExperimentOutlined />, label: PAGE_LABELS.apiCases },
   {
     key: CONFIG_MENU_KEY,
@@ -82,6 +84,8 @@ function renderTabContent(tab: AppTab) {
       return <LogsPage />;
     case 'apiMonitor':
       return <ApiMonitorPage />;
+    case 'serviceMonitor':
+      return <ServiceMonitorPage />;
     case 'apiCases':
       return <ApiCasePage />;
     case 'llmConfigs':

@@ -59,6 +59,15 @@ from app.schemas import (
     KafkaConsoleConnectionOut,
     KafkaConsoleConnectionTestRequest,
     KafkaConsoleConnectionUpdate,
+    K8sClusterConfigCreate,
+    K8sClusterConfigOut,
+    K8sClusterConfigUpdate,
+    K8sConnectOut,
+    K8sPodLogOut,
+    K8sProjectOut,
+    K8sScaleOut,
+    K8sScaleRequest,
+    K8sServiceOut,
     MqttConsoleConfigOut,
     MqttConsoleConnectOut,
     MqttConsoleConnectionCreate,
@@ -112,6 +121,18 @@ from app.kafka_console_service import (
     list_kafka_console_connections,
     test_kafka_console_connection,
     update_kafka_console_connection,
+)
+from app.k8s_monitor_service import (
+    create_k8s_cluster,
+    delete_k8s_cluster,
+    get_k8s_cluster,
+    list_k8s_clusters,
+    list_k8s_projects,
+    list_k8s_services,
+    read_k8s_pod_logs,
+    scale_k8s_workload,
+    test_k8s_cluster_connection,
+    update_k8s_cluster,
 )
 from app.mqtt_console_service import (
     create_mqtt_console_connection,
@@ -428,6 +449,83 @@ def post_redpanda_connect(
         raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
     payload = prepare_redpanda_open(db, conn, public_base=public_base)
     return RedpandaOpenOut(**payload)
+
+
+@router.get("/k8s/clusters", response_model=list[K8sClusterConfigOut])
+def get_k8s_clusters(db: Session = Depends(get_db)):
+    return list_k8s_clusters(db)
+
+
+@router.post("/k8s/clusters", response_model=K8sClusterConfigOut, status_code=201)
+def post_k8s_cluster(data: K8sClusterConfigCreate, db: Session = Depends(get_db)):
+    return create_k8s_cluster(db, data)
+
+
+@router.put("/k8s/clusters/{cluster_id}", response_model=K8sClusterConfigOut)
+def put_k8s_cluster(
+    cluster_id: int,
+    data: K8sClusterConfigUpdate,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return update_k8s_cluster(db, cluster, data)
+
+
+@router.delete("/k8s/clusters/{cluster_id}", status_code=204)
+def delete_k8s_cluster_route(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = get_k8s_cluster(db, cluster_id)
+    delete_k8s_cluster(db, cluster)
+
+
+@router.post("/k8s/clusters/{cluster_id}/connect", response_model=K8sConnectOut)
+def post_k8s_cluster_connect(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return test_k8s_cluster_connection(db, cluster)
+
+
+@router.get("/k8s/clusters/{cluster_id}/projects", response_model=list[K8sProjectOut])
+def get_k8s_cluster_projects(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return list_k8s_projects(cluster)
+
+
+@router.get("/k8s/clusters/{cluster_id}/services", response_model=list[K8sServiceOut])
+def get_k8s_cluster_services(
+    cluster_id: int,
+    project: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return list_k8s_services(cluster, project)
+
+
+@router.post("/k8s/clusters/{cluster_id}/scale", response_model=K8sScaleOut)
+def post_k8s_cluster_scale(
+    cluster_id: int,
+    data: K8sScaleRequest,
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return scale_k8s_workload(cluster, data)
+
+
+@router.get("/k8s/clusters/{cluster_id}/logs", response_model=K8sPodLogOut)
+def get_k8s_pod_logs(
+    cluster_id: int,
+    namespace: str = Query(..., min_length=1),
+    pod_name: str = Query(..., min_length=1),
+    container: str | None = Query(None),
+    tail_lines: int = Query(500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+):
+    cluster = get_k8s_cluster(db, cluster_id)
+    return read_k8s_pod_logs(
+        cluster,
+        namespace=namespace,
+        pod_name=pod_name,
+        container=container,
+        tail_lines=tail_lines,
+    )
 
 
 @router.get("/kafka-console/connections", response_model=list[KafkaConsoleConnectionOut])

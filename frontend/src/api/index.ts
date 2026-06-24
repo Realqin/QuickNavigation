@@ -35,6 +35,16 @@ import type {
   SchemaResetBaselineResult,
   SchemaScanResult,
 } from '../types';
+import type {
+  K8sClusterConfig,
+  K8sClusterFormValues,
+  K8sConnectResult,
+  K8sPodLogResult,
+  K8sProject,
+  K8sScalePayload,
+  K8sScaleResult,
+  K8sService,
+} from '../types/k8s';
 
 const client = axios.create({
   baseURL: resolveApiBaseUrl(),
@@ -49,6 +59,89 @@ export async function fetchHome(project: number, environment: number): Promise<H
 }
 
 export const FILTER_EMPTY = 0;
+
+export async function fetchK8sClusters(): Promise<K8sClusterConfig[]> {
+  const { data } = await client.get<K8sClusterConfig[]>('/api/k8s/clusters');
+  return data;
+}
+
+export async function createK8sCluster(
+  values: K8sClusterFormValues,
+): Promise<K8sClusterConfig> {
+  const { data } = await client.post<K8sClusterConfig>('/api/k8s/clusters', values);
+  return data;
+}
+
+export async function updateK8sCluster(
+  id: number,
+  values: Partial<K8sClusterFormValues>,
+): Promise<K8sClusterConfig> {
+  const { data } = await client.put<K8sClusterConfig>(`/api/k8s/clusters/${id}`, values);
+  return data;
+}
+
+export async function deleteK8sCluster(id: number): Promise<void> {
+  await client.delete(`/api/k8s/clusters/${id}`);
+}
+
+export async function connectK8sCluster(id: number): Promise<K8sConnectResult> {
+  const { data } = await client.post<K8sConnectResult>(`/api/k8s/clusters/${id}/connect`, null, {
+    timeout: 45000,
+  });
+  return data;
+}
+
+export async function fetchK8sProjects(clusterId: number): Promise<K8sProject[]> {
+  const { data } = await client.get<K8sProject[]>(`/api/k8s/clusters/${clusterId}/projects`, {
+    timeout: 45000,
+  });
+  return data;
+}
+
+export async function fetchK8sServices(
+  clusterId: number,
+  project: string,
+): Promise<K8sService[]> {
+  const { data } = await client.get<K8sService[]>(`/api/k8s/clusters/${clusterId}/services`, {
+    params: { project },
+    timeout: 60000,
+  });
+  return data;
+}
+
+export async function scaleK8sService(
+  clusterId: number,
+  payload: K8sScalePayload,
+): Promise<K8sScaleResult> {
+  const { data } = await client.post<K8sScaleResult>(
+    `/api/k8s/clusters/${clusterId}/scale`,
+    payload,
+    { timeout: 45000 },
+  );
+  return data;
+}
+
+export async function fetchK8sPodLogs(params: {
+  clusterId: number;
+  namespace: string;
+  podName: string;
+  container?: string;
+  tailLines?: number;
+}): Promise<K8sPodLogResult> {
+  const { data } = await client.get<K8sPodLogResult>(
+    `/api/k8s/clusters/${params.clusterId}/logs`,
+    {
+      params: {
+        namespace: params.namespace,
+        pod_name: params.podName,
+        container: params.container || undefined,
+        tail_lines: params.tailLines ?? 500,
+      },
+      timeout: 60000,
+    },
+  );
+  return data;
+}
 
 export async function fetchConnections(params?: {
   name?: string;

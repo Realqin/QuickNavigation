@@ -272,6 +272,27 @@ class MqttConsoleConnection(Base):
     )
 
 
+class K8sClusterConfig(Base):
+    """服务监控菜单专用的 Kubernetes 集群连接配置。"""
+
+    __tablename__ = "k8s_cluster_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    api_server: Mapped[str] = mapped_column(String(512), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="native")
+    auth_type: Mapped[str] = mapped_column(String(16), nullable=False, default="password")
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    verify_ssl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class EmbedConsoleSession(Base):
     __tablename__ = "embed_console_sessions"
 

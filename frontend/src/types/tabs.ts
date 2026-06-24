@@ -11,6 +11,7 @@ export type PageType =
   | 'logs'
   | 'dict'
   | 'apiMonitor'
+  | 'serviceMonitor'
   | 'apiCases'
   | 'llmConfigs'
   | 'prompts'
@@ -28,6 +29,7 @@ export const PAGE_LABELS: Record<PageType, string> = {
   logs: '日志订阅',
   dict: '字典管理',
   apiMonitor: '接口监听',
+  serviceMonitor: '服务监控',
   apiCases: '接口用例',
   llmConfigs: 'LLM配置',
   prompts: '提示词管理',
