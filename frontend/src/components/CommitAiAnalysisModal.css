@@ -9,6 +9,58 @@
   padding: 48px 0;
 }
 
+.commit-ai-analysis-modal__stream-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.commit-ai-analysis-modal__stream {
+  margin-bottom: 12px;
+}
+
+.commit-ai-analysis-modal__stream-title,
+.commit-ai-analysis-modal__result-title {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.commit-ai-analysis-modal__stream-body {
+  max-height: min(36vh, 320px);
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.commit-ai-analysis-modal__stream-body--done {
+  max-height: min(24vh, 220px);
+  margin-top: 8px;
+}
+
+.commit-ai-analysis-modal__stream-collapse {
+  margin-bottom: 12px;
+}
+
+.commit-ai-analysis-modal__stream-collapse--after {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.commit-ai-analysis-modal__stream-collapse > summary {
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 4px;
+}
+
 .commit-ai-analysis-modal__body {
   max-height: min(68vh, 720px);
   overflow: auto;
@@ -147,6 +199,18 @@ html[data-theme='dark'] .commit-ai-analysis-modal__body,
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.85);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__stream-body,
+.dark .commit-ai-analysis-modal__stream-body {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+html[data-theme='dark'] .commit-ai-analysis-modal__stream-collapse > summary,
+.dark .commit-ai-analysis-modal__stream-collapse > summary {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 html[data-theme='dark'] .commit-ai-analysis-modal__body.markdown-body h1,

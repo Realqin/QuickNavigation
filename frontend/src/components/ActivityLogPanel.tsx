@@ -1,4 +1,4 @@
-import { DatabaseOutlined, GithubOutlined, RadarChartOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, GithubOutlined, CloudServerOutlined, RadarChartOutlined } from '@ant-design/icons';
 import { Badge, List, Space, Tag, Typography } from 'antd';
 import type { ActivityLog } from '../types';
 import { canOpenActivityLogDetail } from '../utils/activityLogDetail';
@@ -14,6 +14,7 @@ const sourceIcon: Record<string, React.ReactNode> = {
   gitlab: <GithubOutlined style={{ color: '#a371f7' }} />,
   database: <DatabaseOutlined style={{ color: '#3fb950' }} />,
   'api-monitor': <RadarChartOutlined style={{ color: '#61affe' }} />,
+  k8s: <CloudServerOutlined style={{ color: '#326ce5' }} />,
 };
 
 const HOME_LOG_DISPLAY_LIMIT = 8;
@@ -35,7 +36,11 @@ export default function ActivityLogPanel({ logs, onItemClick }: Props) {
             return (
               <List.Item
                 className={`log-item ${item.is_read ? 'read' : 'unread'}${clickable ? ' log-item--clickable' : ''}`}
-                onClick={() => onItemClick?.(item)}
+                onClick={() => {
+                  if (clickable) {
+                    onItemClick?.(item);
+                  }
+                }}
               >
                 <List.Item.Meta
                   avatar={
@@ -54,7 +59,11 @@ export default function ActivityLogPanel({ logs, onItemClick }: Props) {
                   description={
                     <Space direction="vertical" size={2}>
                       {item.summary && (
-                        <Typography.Text type="secondary" ellipsis>
+                        <Typography.Text
+                          type="secondary"
+                          ellipsis
+                          className={clickable ? 'log-item__summary--clickable' : undefined}
+                        >
                           {item.summary}
                         </Typography.Text>
                       )}

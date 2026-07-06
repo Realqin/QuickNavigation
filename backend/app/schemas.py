@@ -268,6 +268,7 @@ class ConnectionTestRequest(BaseModel):
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=512)
     database_name: str | None = Field(default=None, max_length=128)
+    connection_id: int | None = None
 
 
 class ConnectionTestOut(BaseModel):
@@ -348,6 +349,7 @@ class GitlabSubscriptionLinkOut(BaseModel):
     repo_path: str = ""
     enabled: bool
     link_kind: str = "gitlab"
+    cluster_id: int | None = None
     webhook_secret: str | None = None
     last_updated_at: datetime | None = None
     api_scan_status: str | None = None
@@ -393,6 +395,7 @@ class ActivityLogDiffOut(BaseModel):
     repo: str | None = None
     branch: str | None = None
     provider: str | None = None
+    message: str | None = None
 
 
 class ActivityLogOut(BaseModel):
@@ -705,7 +708,9 @@ class K8sConnectOut(BaseModel):
     cluster_id: int
     version: str = ""
     namespace_count: int = 0
+    projects: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: float | None = None
+    last_connected_at: datetime | None = None
 
 
 class K8sProjectOut(BaseModel):
@@ -838,6 +843,24 @@ class K8sAlarmMonitorSyncOut(BaseModel):
     namespaces: list[str] = Field(default_factory=list)
 
 
+class K8sAlarmEventOut(BaseModel):
+    id: int
+    cluster_id: int
+    cluster_name: str = ""
+    namespace: str
+    service_name: str
+    alert_type: str
+    status: str
+    title: str
+    summary: str | None = None
+    payload: dict[str, Any] | None = None
+    is_read: bool = False
+    occurred_at: datetime
+    resolved_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class RedpandaOpenOut(BaseModel):
     embed_url: str
     connection_name: str
@@ -873,6 +896,7 @@ class RepoAccessSettingsOut(BaseModel):
     gitlab_base_url: str
     gitlab_token_set: bool
     gitlab_token_hint: str | None = None
+    gitlab_ssh_key_set: bool = False
     github_token_set: bool
     github_token_hint: str | None = None
     public_webhook_base_url: str
@@ -882,6 +906,7 @@ class RepoAccessSettingsOut(BaseModel):
 class RepoAccessSettingsUpdate(BaseModel):
     gitlab_base_url: str | None = None
     gitlab_token: str | None = None
+    gitlab_ssh_private_key: str | None = None
     github_token: str | None = None
     public_webhook_base_url: str | None = None
 

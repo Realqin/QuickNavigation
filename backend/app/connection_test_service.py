@@ -3,17 +3,41 @@ import time
 
 from sqlalchemy.orm import Session
 
+from app.models import Connection
 from app.schema_monitor_service import ping_schema_monitor_connection
 from app.schemas import ConnectionTestOut, ConnectionTestRequest
 from app.services import get_label_kind
+
+
+def _resolve_saved_credentials(
+    db: Session,
+    connection_id: int | None,
+    username: str,
+    password: str,
+) -> tuple[str, str]:
+    """编辑连接时密码框留空，测试沿用库中已保存的账号密码。"""
+    if connection_id is None:
+        return username, password
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if conn is None:
+        return username, password
+    if not username:
+        username = str(conn.username or "").strip()
+    if not password:
+        password = str(conn.password or "").strip()
+    return username, password
 
 
 def test_connection(db: Session, data: ConnectionTestRequest) -> ConnectionTestOut:
     kind = get_label_kind(db, data.type)
     host = data.host.strip()
     port = int(data.port) if data.port is not None else None
-    username = (data.username or "").strip()
-    password = (data.password or "").strip()
+    username, password = _resolve_saved_credentials(
+        db,
+        data.connection_id,
+        (data.username or "").strip(),
+        (data.password or "").strip(),
+    )
 
     if kind == "database":
         if not username:
@@ -44,9 +68,18 @@ def test_connection(db: Session, data: ConnectionTestRequest) -> ConnectionTestO
             return ConnectionTestOut(ok=False, message="Kafka 集群地址格式无效")
         return _test_kafka_brokers(brokers)
 
+    if kind == "k8s":
+        from app.k8s_connection_service import test_k8s_connection_payload
+
+        return test_k8s_connection_payload(
+            host=host,
+            username=username or None,
+            password=password or None,
+        )
+
     return ConnectionTestOut(
         ok=False,
-        message="仅支持数据库、终端模拟器、Redis、MQTT、Kafka 类型测试连接",
+        message="仅支持数据库、终端模拟器、Redis、MQTT、Kafka、K8s 类型测试连接",
     )
 
 

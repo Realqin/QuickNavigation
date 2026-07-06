@@ -1714,6 +1714,70 @@ html:has(.embedded-console-page--standalone) body {
   padding: 48px 0;
 }
 
+.k8s-alarm-notify-drawer__loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.k8s-alarm-notify-drawer__list .ant-list-item {
+  align-items: flex-start;
+}
+
+.k8s-alarm-notify-drawer__item {
+  border-radius: 8px;
+  margin-bottom: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.k8s-alarm-notify-drawer__item:hover {
+  border-color: var(--primary-color, #1668dc);
+}
+
+.k8s-alarm-notify-drawer__item--unread {
+  background: rgba(255, 77, 79, 0.08);
+  border-color: rgba(255, 77, 79, 0.35);
+}
+
+.k8s-alarm-notify-drawer__detail {
+  display: flex;
+  flex-direction: column;
+}
+
+.k8s-alarm-notify-drawer__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.k8s-alarm-notify-drawer__summary {
+  margin: 4px 0 0 !important;
+  color: inherit;
+}
+
+.k8s-alarm-notify-drawer__time {
+  font-size: 12px;
+}
+
+.k8s-service-name-link {
+  display: inline;
+  color: #1677ff;
+  text-decoration: none;
+}
+
+.k8s-service-name-link .ant-typography {
+  color: #1677ff;
+}
+
+.k8s-service-name-link:hover,
+.k8s-service-name-link:hover .ant-typography {
+  color: #4096ff;
+  text-decoration: underline;
+}
+
 .k8s-pod-terminal-modal__status {
   display: block;
   margin-bottom: 8px;
@@ -2185,9 +2249,25 @@ html:has(.embedded-console-page--standalone) body {
 
 
 .log-item--clickable {
-
   cursor: pointer;
+}
 
+.log-item--clickable .ant-list-item-meta-title .ant-typography-strong {
+  color: #1677ff;
+}
+
+.log-item--clickable:hover .ant-list-item-meta-title .ant-typography-strong {
+  color: #4096ff;
+  text-decoration: underline;
+}
+
+.log-item__summary--clickable {
+  color: #1677ff !important;
+}
+
+.log-item--clickable:hover .log-item__summary--clickable {
+  color: #4096ff !important;
+  text-decoration: underline;
 }
 
 

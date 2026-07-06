@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     gitlab_base_url: str = "https://gitlab.com"
     public_webhook_base_url: str = ""
     schema_monitor_interval_seconds: int = 300
+    k8s_alarm_monitor_interval_seconds: int = 300
     omnidb_internal_url: str = "http://127.0.0.1:8081"
     omnidb_public_port: int = 8081
     omnidb_admin_user: str = "admin"

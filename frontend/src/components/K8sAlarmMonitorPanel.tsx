@@ -18,6 +18,7 @@ import {
   fetchK8sAlarmMonitorGroups,
   fetchK8sAlarmMonitorServices,
   saveK8sAlarmMonitorService,
+  syncK8sAlarmMonitor,
   syncK8sAlarmMonitorGroup,
   updateK8sAlarmMonitorGroup,
 } from '../api';
@@ -90,6 +91,7 @@ export default function K8sAlarmMonitorPanel({
   const [serviceKeyword, setServiceKeyword] = useState('');
   const [editDrafts, setEditDrafts] = useState<Record<string, ServiceEditDraft>>({});
   const [savingAll, setSavingAll] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
   const [switchingNamespace, setSwitchingNamespace] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
@@ -107,6 +109,22 @@ export default function K8sAlarmMonitorPanel({
       setGroupsLoading(false);
     }
   }, [clusterId, message]);
+
+  const handleSyncAllGroups = async () => {
+    if (!clusterId) {
+      return;
+    }
+    setSyncingAll(true);
+    try {
+      const result = await syncK8sAlarmMonitor(clusterId);
+      await loadGroups();
+      message.success(`已同步 ${result.groups_count} 个分组`);
+    } catch (error) {
+      message.error(getErrorMessage(error, '同步报警监控分组失败'));
+    } finally {
+      setSyncingAll(false);
+    }
+  };
 
   const loadServices = useCallback(
     async (namespace: string) => {
@@ -421,6 +439,18 @@ export default function K8sAlarmMonitorPanel({
         className="k8s-alarm-monitor-modal"
       >
         <div className="k8s-alarm-monitor-modal__toolbar">
+          <Button
+            icon={<ReloadOutlined />}
+            loading={syncingAll}
+            onClick={() => {
+              handleSyncAllGroups().catch(() => undefined);
+            }}
+          >
+            同步全部分组
+          </Button>
+          <Typography.Text type="secondary">
+            仅拉取项目列表入库；服务列表请在分组内点「刷新」同步
+          </Typography.Text>
           <Input
             allowClear
             prefix={<SearchOutlined />}
@@ -480,7 +510,7 @@ export default function K8sAlarmMonitorPanel({
             loading={servicesLoading}
             onClick={() => {
               if (activeNamespace) {
-                loadServices(activeNamespace).catch(() => undefined);
+                refreshNamespace(activeNamespace).catch(() => undefined);
               }
             }}
           >

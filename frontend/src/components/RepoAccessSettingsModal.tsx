@@ -13,6 +13,7 @@ interface FormValues {
   gitlab_base_url: string;
   public_webhook_base_url: string;
   gitlab_token?: string;
+  gitlab_ssh_private_key?: string;
   github_token?: string;
 }
 
@@ -50,6 +51,9 @@ export default function RepoAccessSettingsModal({ open, onClose, onSaved }: Prop
       if (values.gitlab_token?.trim()) {
         payload.gitlab_token = values.gitlab_token.trim();
       }
+      if (values.gitlab_ssh_private_key?.trim()) {
+        payload.gitlab_ssh_private_key = values.gitlab_ssh_private_key.trim();
+      }
       if (values.github_token?.trim()) {
         payload.github_token = values.github_token.trim();
       }
@@ -80,7 +84,7 @@ export default function RepoAccessSettingsModal({ open, onClose, onSaved }: Prop
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="用于拉取私有仓库 commit diff，以及复制 Webhook 对外地址"
+        message="用于拉取私有仓库 commit diff，以及复制 Webhook 对外地址。若 GitLab HTTP 不可用，可配置 SSH Deploy Key。"
       />
       <Form form={form} layout="vertical" disabled={loading}>
         <Form.Item
@@ -105,6 +109,25 @@ export default function RepoAccessSettingsModal({ open, onClose, onSaved }: Prop
           }
         >
           <Input.Password placeholder="输入新的 GitLab Token" autoComplete="new-password" />
+        </Form.Item>
+        <Form.Item
+          name="gitlab_ssh_private_key"
+          label="GitLab SSH 私钥（Deploy Key）"
+          extra={
+            current?.gitlab_ssh_key_set ? (
+              <Typography.Text type="secondary">
+                已配置 SSH 私钥，留空则保持不变；填写新内容将覆盖
+              </Typography.Text>
+            ) : (
+              '在 GitLab 项目 Settings → Repository → Deploy keys 添加公钥后，粘贴对应私钥（含 BEGIN/END 行）'
+            )
+          }
+        >
+          <Input.TextArea
+            rows={4}
+            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+            autoComplete="new-password"
+          />
         </Form.Item>
         <Form.Item
           name="github_token"

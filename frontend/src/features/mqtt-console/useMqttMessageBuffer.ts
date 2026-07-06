@@ -6,11 +6,18 @@ import {
 } from './mqttConsoleLimits';
 import type { MqttMessageRecord } from './types';
 
-function trimMessages(items: MqttMessageRecord[]): MqttMessageRecord[] {
-  if (items.length <= MQTT_MESSAGE_MAX_COUNT) {
-    return items;
+function mergeAndTrimMessages(
+  current: MqttMessageRecord[],
+  batch: MqttMessageRecord[],
+): MqttMessageRecord[] {
+  const nextLength = current.length + batch.length;
+  if (nextLength <= MQTT_MESSAGE_MAX_COUNT) {
+    return current.concat(batch);
   }
-  return items.slice(-MQTT_MESSAGE_MAX_COUNT);
+  if (batch.length >= MQTT_MESSAGE_MAX_COUNT) {
+    return batch.slice(-MQTT_MESSAGE_MAX_COUNT);
+  }
+  return current.slice(nextLength - MQTT_MESSAGE_MAX_COUNT).concat(batch);
 }
 
 export function useMqttMessageBuffer() {
@@ -26,7 +33,7 @@ export function useMqttMessageBuffer() {
     const batch = pendingRef.current;
     pendingRef.current = [];
     lastFlushAtRef.current = Date.now();
-    setMessages((prev) => trimMessages(prev.concat(batch)));
+    setMessages((prev) => mergeAndTrimMessages(prev, batch));
   }, []);
 
   const scheduleFlush = useCallback(() => {

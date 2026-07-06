@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
   Row,
+  Segmented,
   Space,
   Tag,
   Typography,
@@ -15,11 +16,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MqttSubscription } from '../../types';
 import type { MqttConnectionForm } from './types';
 import { buildMqttWebSocketUrl } from './buildWebSocketUrl';
-import { formatMessagePayload } from './formatMessagePayload';
+import { parseMessagePayload } from './formatMessagePayload';
 import MqttMessageVirtualList from './MqttMessageVirtualList';
 import { MQTT_CONNECTION_MAX_MS } from './mqttConsoleLimits';
 import { useMqttMessageBuffer } from './useMqttMessageBuffer';
-import { nextMessageColorIndex } from './messageColors';
+import { getCodeMessageColor, getRandomFallbackMessageColor } from './messageColors';
 import { mqttTopicMatches } from './mqttTopicMatch';
 
 import { useMqttBridgeClient } from './useMqttBridgeClient';
@@ -47,6 +48,8 @@ interface Props {
   brokerActive?: boolean;
 }
 
+type FilterRelation = 'or' | 'and';
+
 const defaultForm: MqttConnectionForm = {
   host: '',
   port: 1883,
@@ -62,6 +65,28 @@ function formatPayload(payload: Buffer): string {
   } catch {
     return payload.toString('hex');
   }
+}
+
+function buildMessageSearchFields(item: { topic: string; payload: string; code?: string }) {
+  return {
+    topic: item.topic.toLowerCase(),
+    payload: item.payload.toLowerCase(),
+    code: item.code?.toLowerCase() ?? '',
+  };
+}
+
+function messageMatchesKeyword(
+  fields: ReturnType<typeof buildMessageSearchFields>,
+  keyword: string,
+): boolean {
+  if (!keyword) {
+    return true;
+  }
+  return (
+    fields.topic.includes(keyword) ||
+    fields.payload.includes(keyword) ||
+    fields.code.includes(keyword)
+  );
 }
 
 export default function MqttConsole({
@@ -88,6 +113,8 @@ export default function MqttConsole({
   const [newTopic, setNewTopic] = useState('');
   const [publishPayload, setPublishPayload] = useState('');
   const [filterText, setFilterText] = useState('');
+  const [filterText2, setFilterText2] = useState('');
+  const [filterRelation, setFilterRelation] = useState<FilterRelation>('or');
   const [internalSelectedTopic, setInternalSelectedTopic] = useState<string | null>(null);
   const selectedTopic = isTopicControlled ? (controlledSelectedTopic ?? null) : internalSelectedTopic;
   const setSelectedTopic = (topic: string | null) => {
@@ -108,7 +135,8 @@ export default function MqttConsole({
   const manualBridgeClient = useMqttManualBridgeClient();
   const autoConnectAttemptedRef = useRef(false);
   const prevStatusRef = useRef<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
-  const messageColorRef = useRef(-1);
+  const codeColorMapRef = useRef(new Map<string, string>());
+  const nextCodeColorIndexRef = useRef(0);
   const connectionTimerRef = useRef<number | null>(null);
   const bridgeConnectRef = useRef(bridgeClient.connect);
   const directConnectRef = useRef(directClient.connect);
@@ -192,17 +220,32 @@ export default function MqttConsole({
     form.wsPath,
   ]);
 
+  const getCodeBackgroundColor = (code: string) => {
+    const cached = codeColorMapRef.current.get(code);
+    if (cached) {
+      return cached;
+    }
+    const color = getCodeMessageColor(nextCodeColorIndexRef.current);
+    nextCodeColorIndexRef.current += 1;
+    codeColorMapRef.current.set(code, color);
+    return color;
+  };
+
   const pushMessage = (topic: string, payload: string) => {
     const receivedAtMs = Date.now();
-    messageColorRef.current = nextMessageColorIndex(messageColorRef.current);
+    const parsedPayload = parseMessagePayload(payload);
+    const backgroundColor = parsedPayload.code
+      ? getCodeBackgroundColor(parsedPayload.code)
+      : getRandomFallbackMessageColor();
     messageSeqRef.current += 1;
     pushBufferedMessage({
       id: `m${messageSeqRef.current}`,
       topic,
-      payload: formatMessagePayload(payload),
+      payload: parsedPayload.payload,
+      code: parsedPayload.code,
       receivedAt: new Date(receivedAtMs).toLocaleString(),
       receivedAtMs,
-      colorIndex: messageColorRef.current,
+      backgroundColor,
     });
   };
 
@@ -365,16 +408,26 @@ export default function MqttConsole({
     if (selectedTopic) {
       result = result.filter((item) => mqttTopicMatches(selectedTopic, item.topic));
     }
-    const keyword = filterText.trim().toLowerCase();
-    if (keyword) {
-      result = result.filter(
-        (item) =>
-          item.topic.toLowerCase().includes(keyword) ||
-          item.payload.toLowerCase().includes(keyword),
-      );
+    const keyword1 = filterText.trim().toLowerCase();
+    const keyword2 = filterText2.trim().toLowerCase();
+    if (keyword1 || keyword2) {
+      result = result.filter((item) => {
+        const searchFields = buildMessageSearchFields(item);
+        if (!keyword1) {
+          return messageMatchesKeyword(searchFields, keyword2);
+        }
+        if (!keyword2) {
+          return messageMatchesKeyword(searchFields, keyword1);
+        }
+        const matchedFirst = messageMatchesKeyword(searchFields, keyword1);
+        const matchedSecond = messageMatchesKeyword(searchFields, keyword2);
+        return filterRelation === 'and'
+          ? matchedFirst && matchedSecond
+          : matchedFirst || matchedSecond;
+      });
     }
-    return [...result].sort((a, b) => a.receivedAtMs - b.receivedAtMs);
-  }, [messages, selectedTopic, filterText]);
+    return result;
+  }, [messages, selectedTopic, filterText, filterText2, filterRelation]);
 
   useEffect(() => {
     const justConnected = status === 'connected' && prevStatusRef.current !== 'connected';
@@ -528,7 +581,8 @@ export default function MqttConsole({
   const handleClearMessages = () => {
     messageSeqRef.current = 0;
     clearMessages();
-    messageColorRef.current = -1;
+    codeColorMapRef.current.clear();
+    nextCodeColorIndexRef.current = 0;
     message.success('消息已清空');
   };
 
@@ -759,7 +813,7 @@ export default function MqttConsole({
             size="small"
             className="mqtt-console__card mqtt-console__messages-card"
             extra={
-              <Space size={8}>
+              <Space size={8} className="mqtt-console__filter-bar">
                 <Button
                   size="small"
                   icon={<ClearOutlined />}
@@ -770,10 +824,26 @@ export default function MqttConsole({
                 </Button>
                 <Input
                   allowClear
-                  placeholder="过滤 Topic / 内容"
+                  placeholder="过滤 Topic / 内容 / code"
                   value={filterText}
                   onChange={(e) => setFilterText(e.target.value)}
-                  style={{ width: 220 }}
+                  className="mqtt-console__filter-input"
+                />
+                <Segmented
+                  size="small"
+                  value={filterRelation}
+                  onChange={(value) => setFilterRelation(value as FilterRelation)}
+                  options={[
+                    { label: '或', value: 'or' },
+                    { label: '且', value: 'and' },
+                  ]}
+                />
+                <Input
+                  allowClear
+                  placeholder="过滤条件 2"
+                  value={filterText2}
+                  onChange={(e) => setFilterText2(e.target.value)}
+                  className="mqtt-console__filter-input"
                 />
               </Space>
             }

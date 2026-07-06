@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -362,6 +363,103 @@ async def call_chat_completion(
         "model": data.get("model") or model_name,
         "max_tokens": effective_max_tokens,
     }
+
+
+def _extract_stream_delta(payload: dict[str, Any]) -> tuple[str, str]:
+    choices = payload.get("choices") or []
+    if not choices:
+        return "", ""
+    delta = (choices[0] or {}).get("delta") or {}
+    if not isinstance(delta, dict):
+        return "", ""
+    reasoning = _extract_message_text(delta.get("reasoning_content"))
+    if not reasoning:
+        reasoning = _extract_message_text(delta.get("reasoning"))
+    content = _extract_assistant_content(delta)
+    return reasoning, content
+
+
+async def stream_chat_completion(
+    *,
+    api_url: str,
+    api_key: str,
+    model_name: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 1200,
+    timeout: float = 120.0,
+    context_limit: int | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    if not api_key:
+        raise HTTPException(status_code=400, detail="LLM API Key 不能为空")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="LLM 模型名称不能为空")
+
+    url = _chat_completions_url(api_url)
+    messages_to_send = messages
+    effective_max_tokens = max(MIN_OUTPUT_TOKENS, int(max_tokens))
+    if context_limit and context_limit > 0:
+        messages_to_send, effective_max_tokens, input_tokens = fit_messages_to_context(
+            messages,
+            context_limit=context_limit,
+            max_tokens=max_tokens,
+        )
+        if effective_max_tokens != max_tokens or messages_to_send != messages:
+            logger.info(
+                "llm_context_adjusted model=%s input_tokens=%s max_tokens=%s->%s context_limit=%s",
+                model_name,
+                input_tokens,
+                max_tokens,
+                effective_max_tokens,
+                context_limit,
+            )
+
+    payload = {
+        "model": model_name,
+        "messages": messages_to_send,
+        "stream": True,
+        "temperature": temperature,
+        "max_tokens": effective_max_tokens,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    resolved_model = model_name
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    data_text = line[5:].strip()
+                    if not data_text or data_text == "[DONE]":
+                        if data_text == "[DONE]":
+                            break
+                        continue
+                    try:
+                        chunk = json.loads(data_text)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(chunk.get("model"), str) and chunk["model"].strip():
+                        resolved_model = chunk["model"].strip()
+                    reasoning, content = _extract_stream_delta(chunk)
+                    if reasoning:
+                        yield {"kind": "reasoning", "delta": reasoning}
+                    if content:
+                        yield {"kind": "content", "delta": content}
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text or f"HTTP {exc.response.status_code}"
+        raise HTTPException(status_code=502, detail=f"LLM 请求失败: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM 连接失败: {exc}") from exc
+
+    yield {"kind": "done", "model": resolved_model, "max_tokens": effective_max_tokens}
 
 
 def _find_model_match(model_name: str, models: list[str]) -> str | None:

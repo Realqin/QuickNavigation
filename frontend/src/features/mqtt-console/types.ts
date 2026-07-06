@@ -2,9 +2,10 @@ export interface MqttMessageRecord {
   id: string;
   topic: string;
   payload: string;
+  code?: string;
   receivedAt: string;
   receivedAtMs: number;
-  colorIndex: number;
+  backgroundColor: string;
 }
 
 export interface MqttConnectionForm {

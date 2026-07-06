@@ -1,8 +1,12 @@
 import asyncio
 import logging
+import os
 import re
+import subprocess
+import tempfile
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -10,9 +14,13 @@ import httpx
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
-from app.repo_access_config import get_github_token, get_gitlab_base_url, get_gitlab_token
-from app.repo_access_config import get_github_token, get_gitlab_base_url, get_gitlab_token
 from app.database import SessionLocal
+from app.repo_access_config import (
+    get_github_token,
+    get_gitlab_base_url,
+    get_gitlab_ssh_command,
+    get_gitlab_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,18 +278,11 @@ def _humanize_gitlab_access_error(status_code: int, body: str) -> str:
         text = text.replace(token, "****")
 
     lowered = text.lower()
-    if "10808" in text or ("127.0.0.1" in text and "connect" in lowered):
-        return (
-            "GitLab 服务端或中间网络代理异常，无法访问仓库。"
-            f"详情：{text[:240]}。"
-            "请联系 GitLab 管理员检查服务器出站代理，或确认运行后端的 Docker 容器能直连 GitLab"
-        )
-    if status_code == 404:
-        return "GitLab 仓库不存在或无访问权限，请检查 Clone 地址与 Token"
-    if status_code in {401, 403}:
-        return "GitLab Token 无效或权限不足，请在「仓库访问配置」中更新 Token"
     if status_code >= 500:
-        return f"GitLab 服务异常（HTTP {status_code}）：{text[:240]}"
+        return (
+            f"GitLab 接口异常（HTTP {status_code}）：{text[:300]}。"
+            "若 HTTP 不可用，可在「仓库访问配置」中填写 GitLab SSH 私钥（Deploy Key）后重试。"
+        )
     return text[:240]
 
 
@@ -303,6 +304,7 @@ def verify_gitlab_repo_access(clone_url: str) -> None:
             url,
             headers={"PRIVATE-TOKEN": token, "User-Agent": "QuickNavigation/1.0"},
             timeout=20.0,
+            trust_env=False,
         )
     except httpx.HTTPError as exc:
         raise RuntimeError(f"无法连接 GitLab：{exc}") from exc
@@ -353,19 +355,6 @@ def describe_clone_url_format(clone_url: str) -> str:
     if is_ssh_style_clone_url(raw):
         return "ssh"
     return "other"
-
-
-def has_gitlab_tree_branch(url: str) -> bool:
-    return "/-/tree/" in unquote((url or "").strip()).lower()
-
-
-def parse_gitlab_tree_branch(url: str) -> ParsedRepo | None:
-    if not has_gitlab_tree_branch(url):
-        return None
-    parsed = parse_repo_url(url)
-    if not parsed.branch or not parsed.repo_path:
-        return None
-    return parsed
 
 
 def has_gitlab_tree_branch(url: str) -> bool:
@@ -449,10 +438,175 @@ def gitlab_repo_path(payload: dict[str, Any]) -> str | None:
     return project.get("path_with_namespace")
 
 
-async def fetch_commit_diff(provider: str, repo: str, sha: str) -> str:
+@dataclass(frozen=True)
+class CommitDiffResult:
+    diff: str
+    error: str | None = None
+
+
+def build_gitlab_clone_url(repo_path: str) -> str:
+    base = get_gitlab_base_url().rstrip("/")
+    path = repo_path.strip("/")
+    return f"{base}/{path}.git"
+
+
+def build_gitlab_ssh_clone_url(repo_path: str) -> str:
+    parsed = urlparse(get_gitlab_base_url())
+    host = parsed.hostname or parsed.netloc.split(":")[0]
+    if not host:
+        host = "gitlab.local"
+    path = repo_path.strip("/")
+    return f"git@{host}:{path}.git"
+
+
+def git_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    ssh_command = get_gitlab_ssh_command()
+    if ssh_command:
+        env["GIT_SSH_COMMAND"] = ssh_command
+    return env
+
+
+def _subscription_cache_dirs(subscription_id: int) -> list[Path]:
+    base = Path(settings.api_repo_cache_dir)
+    if not base.is_dir():
+        return []
+    prefix = f"{subscription_id}_"
+    return sorted(
+        item
+        for item in base.iterdir()
+        if item.is_dir() and (item.name.startswith(prefix) or item.name == str(subscription_id))
+    )
+
+
+def _try_git_show_in_cache(cache_dir: Path, sha: str) -> CommitDiffResult | None:
+    if not (cache_dir / ".git").exists():
+        return None
+    config_args = git_auth_config_args()
+    fetch = subprocess.run(
+        ["git", *config_args, "fetch", "--depth", "1", "origin", sha],
+        cwd=str(cache_dir),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=git_subprocess_env(),
+    )
+    if fetch.returncode != 0:
+        return None
+    show = subprocess.run(
+        ["git", "show", sha, "-p", "--format="],
+        cwd=str(cache_dir),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=git_subprocess_env(),
+    )
+    if show.returncode != 0 or not show.stdout.strip():
+        return None
+    return CommitDiffResult(show.stdout, None)
+
+
+def _fetch_gitlab_diff_via_git_sync(
+    clone_url: str,
+    sha: str,
+    branch: str | None,
+    *,
+    subscription_id: int | None = None,
+) -> CommitDiffResult:
+    if subscription_id is not None:
+        for cache_dir in _subscription_cache_dirs(subscription_id):
+            cached = _try_git_show_in_cache(cache_dir, sha)
+            if cached is not None:
+                return cached
+
+    effective = clone_url.strip()
+    if not (get_gitlab_ssh_command() and is_ssh_style_clone_url(effective)):
+        effective = prepare_git_clone_url(clone_url)
+    config_args = git_auth_config_args()
+
+    def git_run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *config_args, *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+            env=git_subprocess_env(),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="qn-diff-") as tmp:
+        cwd = Path(tmp)
+        git_run(["init"], cwd)
+        git_run(["remote", "add", "origin", effective], cwd)
+        fetch = git_run(["fetch", "--depth", "1", "origin", sha], cwd)
+        if fetch.returncode != 0 and branch:
+            fetch = git_run(["fetch", "--depth", "50", "origin", branch], cwd)
+        if fetch.returncode != 0:
+            detail = (fetch.stderr or fetch.stdout or "git fetch 失败").strip()
+            if "returned error: 500" in detail.lower():
+                return CommitDiffResult("", _humanize_gitlab_access_error(500, detail))
+            return CommitDiffResult("", f"Git 拉取提交失败：{detail[:240]}")
+        show = git_run(["show", sha, "-p", "--format="], cwd)
+        if show.returncode != 0:
+            detail = (show.stderr or show.stdout or "git show 失败").strip()
+            return CommitDiffResult("", detail[:240])
+        return CommitDiffResult(show.stdout, None)
+
+
+async def fetch_commit_diff(
+    provider: str,
+    repo: str,
+    sha: str,
+    *,
+    clone_url: str | None = None,
+    branch: str | None = None,
+    subscription_id: int | None = None,
+) -> CommitDiffResult:
     if provider == "gitlab":
-        return await _fetch_gitlab_diff(repo, sha)
-    return await _fetch_github_diff(repo, sha)
+        use_ssh = bool(get_gitlab_ssh_command())
+        resolved_clone = clone_url or (build_gitlab_clone_url(repo) if repo else None)
+        if use_ssh and repo:
+            if not resolved_clone or not is_ssh_style_clone_url(resolved_clone):
+                resolved_clone = build_gitlab_ssh_clone_url(repo)
+
+        async def _git_fetch() -> CommitDiffResult | None:
+            if not resolved_clone:
+                return None
+            return await asyncio.to_thread(
+                _fetch_gitlab_diff_via_git_sync,
+                resolved_clone,
+                sha,
+                branch,
+                subscription_id=subscription_id,
+            )
+
+        if use_ssh:
+            git_result = await _git_fetch()
+            if git_result and git_result.diff:
+                return git_result
+            api_result = await _fetch_gitlab_diff(repo, sha)
+            if api_result.diff:
+                return api_result
+            if git_result is not None:
+                return CommitDiffResult("", git_result.error or api_result.error)
+            return api_result
+
+        api_result = await _fetch_gitlab_diff(repo, sha)
+        if api_result.diff:
+            return api_result
+        git_result = await _git_fetch()
+        if git_result and git_result.diff:
+            return git_result
+        if git_result is not None:
+            return CommitDiffResult("", api_result.error or git_result.error)
+        return api_result
+    diff = await _fetch_github_diff(repo, sha)
+    if diff:
+        return CommitDiffResult(diff, None)
+    return CommitDiffResult("", "GitHub 未返回 diff 内容")
 
 
 async def fetch_commit_time(provider: str, repo: str, sha: str) -> str | None:
@@ -473,7 +627,7 @@ async def _fetch_github_commit_time(repo: str, sha: str) -> str | None:
         headers["Authorization"] = f"Bearer {token}"
     url = f"https://api.github.com/repos/{repo}/commits/{sha}"
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, trust_env=False) as client:
             response = await client.get(url, headers=headers)
             if response.status_code != 200:
                 return None
@@ -505,73 +659,7 @@ async def _fetch_gitlab_commit_time(project_path: str, sha: str) -> str | None:
     if token:
         headers["PRIVATE-TOKEN"] = token
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
-            if response.status_code != 200:
-                return None
-            data = response.json()
-            if not isinstance(data, dict):
-                return None
-            for key in ("committed_date", "authored_date", "created_at"):
-                ts = data.get(key)
-                if isinstance(ts, str) and ts.strip():
-                    return ts.strip()
-    except httpx.HTTPError:
-        logger.exception("GitLab commit time fetch failed for %s@%s", project_path, sha)
-    return None
-
-
-async def fetch_commit_time(provider: str, repo: str, sha: str) -> str | None:
-    if provider == "gitlab":
-        return await _fetch_gitlab_commit_time(repo, sha)
-    if provider == "github":
-        return await _fetch_github_commit_time(repo, sha)
-    return None
-
-
-async def _fetch_github_commit_time(repo: str, sha: str) -> str | None:
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "QuickNavigation/1.0",
-    }
-    token = get_github_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    url = f"https://api.github.com/repos/{repo}/commits/{sha}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
-            if response.status_code != 200:
-                return None
-            data = response.json()
-            commit = data.get("commit") if isinstance(data, dict) else None
-            if not isinstance(commit, dict):
-                return None
-            committer = commit.get("committer")
-            if isinstance(committer, dict):
-                ts = committer.get("date")
-                if isinstance(ts, str) and ts.strip():
-                    return ts.strip()
-            author = commit.get("author")
-            if isinstance(author, dict):
-                ts = author.get("date")
-                if isinstance(ts, str) and ts.strip():
-                    return ts.strip()
-    except httpx.HTTPError:
-        logger.exception("GitHub commit time fetch failed for %s@%s", repo, sha)
-    return None
-
-
-async def _fetch_gitlab_commit_time(project_path: str, sha: str) -> str | None:
-    encoded = urllib.parse.quote(project_path, safe="")
-    base = get_gitlab_base_url().rstrip("/")
-    url = f"{base}/api/v4/projects/{encoded}/repository/commits/{sha}"
-    headers = {"User-Agent": "QuickNavigation/1.0"}
-    token = get_gitlab_token()
-    if token:
-        headers["PRIVATE-TOKEN"] = token
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, trust_env=False) as client:
             response = await client.get(url, headers=headers)
             if response.status_code != 200:
                 return None
@@ -597,7 +685,7 @@ async def _fetch_github_diff(repo: str, sha: str) -> str:
         headers["Authorization"] = f"Bearer {token}"
     url = f"https://api.github.com/repos/{repo}/commits/{sha}"
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, trust_env=False) as client:
             response = await client.get(url, headers=headers)
             if response.status_code == 200:
                 return response.text
@@ -606,7 +694,7 @@ async def _fetch_github_diff(repo: str, sha: str) -> str:
     return ""
 
 
-async def _fetch_gitlab_diff(project_path: str, sha: str) -> str:
+async def _fetch_gitlab_diff(project_path: str, sha: str) -> CommitDiffResult:
     encoded = urllib.parse.quote(project_path, safe="")
     base = get_gitlab_base_url().rstrip("/")
     url = f"{base}/api/v4/projects/{encoded}/repository/commits/{sha}/diff"
@@ -615,23 +703,36 @@ async def _fetch_gitlab_diff(project_path: str, sha: str) -> str:
     if token:
         headers["PRIVATE-TOKEN"] = token
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, trust_env=False) as client:
             response = await client.get(url, headers=headers)
             if response.status_code != 200:
-                return ""
+                logger.warning(
+                    "GitLab diff API failed for %s@%s: HTTP %s %s",
+                    project_path,
+                    sha,
+                    response.status_code,
+                    response.text[:200],
+                )
+                return CommitDiffResult(
+                    "",
+                    _humanize_gitlab_access_error(response.status_code, response.text),
+                )
             chunks = response.json()
             if not isinstance(chunks, list):
-                return ""
+                return CommitDiffResult("", "GitLab diff 响应格式无效")
             parts: list[str] = []
             for item in chunks:
                 old_path = item.get("old_path") or item.get("new_path") or "file"
                 new_path = item.get("new_path") or old_path
                 parts.append(f"diff --git a/{old_path} b/{new_path}")
                 parts.append(item.get("diff") or "")
-            return "\n".join(parts)
-    except httpx.HTTPError:
+            diff = "\n".join(parts).strip()
+            if not diff:
+                return CommitDiffResult("", "GitLab 未返回 diff 内容")
+            return CommitDiffResult(diff, None)
+    except httpx.HTTPError as exc:
         logger.exception("GitLab diff fetch failed for %s@%s", project_path, sha)
-    return ""
+        return CommitDiffResult("", f"无法连接 GitLab：{exc}")
 
 
 def short_sha(sha: str | None) -> str:
@@ -649,20 +750,71 @@ def extract_commit_sha(payload: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _find_sub_link_clone_url(conn, repo_path: str) -> str | None:
+    repo_path = repo_path.strip().lower()
+    repo_name = repo_path.rsplit("/", 1)[-1]
+    for item in conn.sub_links or []:
+        if not isinstance(item, dict):
+            continue
+        clone_url = str(item.get("clone_url") or "").strip()
+        url = str(item.get("url") or "").strip().lower()
+        if clone_url and repo_path in clone_url.lower():
+            return clone_url
+        if clone_url and repo_name and repo_name in url:
+            return clone_url
+    return None
+
+
+def _resolve_log_clone_url(db, log, repo: str, provider: str) -> str | None:
+    if provider != "gitlab":
+        return None
+    payload = dict(log.payload or {})
+    clone_url = str(payload.get("clone_url") or "").strip()
+    if clone_url:
+        return clone_url
+    from app.models import Connection
+
+    if log.connection_id:
+        conn = db.query(Connection).filter(Connection.id == log.connection_id).first()
+        if conn:
+            if str(conn.host or "").strip():
+                return str(conn.host).strip()
+            matched = _find_sub_link_clone_url(conn, str(repo))
+            if matched:
+                return matched
+    if repo:
+        if get_gitlab_ssh_command():
+            return build_gitlab_ssh_clone_url(repo)
+        return build_gitlab_clone_url(repo)
+    return None
+
+
 async def fetch_log_diff_background(log_id: int, provider: str, repo: str, sha: str) -> None:
     from app.models import ActivityLog
     from app.schemas import ActivityLogOut
     from app.websocket_manager import ws_manager
 
     try:
-        diff = await fetch_commit_diff(provider, repo, sha)
         db = SessionLocal()
         try:
             log = db.query(ActivityLog).filter(ActivityLog.id == log_id).first()
             if not log:
                 return
             payload = dict(log.payload or {})
-            payload["diff"] = diff
+            clone_url = _resolve_log_clone_url(db, log, str(repo), provider)
+            branch = str(payload.get("branch") or "").strip() or None
+            result = await fetch_commit_diff(
+                provider,
+                repo,
+                sha,
+                clone_url=clone_url,
+                branch=branch,
+                subscription_id=log.subscription_id,
+            )
+            if not result.diff:
+                return
+            payload["diff"] = result.diff
+            payload.pop("diff_error", None)
             log.payload = payload
             flag_modified(log, "payload")
             db.commit()

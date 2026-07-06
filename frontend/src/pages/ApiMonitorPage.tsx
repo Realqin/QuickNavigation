@@ -627,7 +627,7 @@ export default function ApiMonitorPage() {
       <aside className="api-monitor-page__sidebar">
         <div className="api-monitor-page__sidebar-head">
           <Space size={8} align="center">
-            <Typography.Text strong>接口监听</Typography.Text>
+            <Typography.Text strong>接口调试</Typography.Text>
             <Button
               type="link"
               size="small"

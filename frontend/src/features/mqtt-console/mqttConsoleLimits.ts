@@ -1,11 +1,11 @@
-/** 消息流最多保留条数（超出后剔除最旧消息） */
-export const MQTT_MESSAGE_MAX_COUNT = 1000;
+/** Maximum retained message count. Older records are dropped first. */
+export const MQTT_MESSAGE_MAX_COUNT = 10000;
 
-/** 批量刷新的最大间隔（毫秒），降低高频消息时的渲染压力 */
+/** Batch UI updates to reduce render pressure during high-frequency streams. */
 export const MQTT_MESSAGE_FLUSH_MS = 100;
 
-/** 待刷新缓冲超过该条数时立即落盘，避免积压 */
-export const MQTT_MESSAGE_PENDING_MAX = 200;
+/** Flush sooner if a burst grows past this size. */
+export const MQTT_MESSAGE_PENDING_MAX = 500;
 
-/** 单次连接最长维持时间（毫秒） */
+/** Maximum single connection lifetime in milliseconds. */
 export const MQTT_CONNECTION_MAX_MS = 30 * 60 * 1000;

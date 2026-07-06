@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -64,6 +65,7 @@ from app.schemas import (
     K8sAlarmMonitorServiceOut,
     K8sAlarmMonitorServiceUpdate,
     K8sAlarmMonitorSyncOut,
+    K8sAlarmEventOut,
     K8sClusterConfigCreate,
     K8sClusterConfigOut,
     K8sClusterConfigUpdate,
@@ -128,6 +130,12 @@ from app.kafka_console_service import (
     test_kafka_console_connection,
     update_kafka_console_connection,
 )
+from app.k8s_alarm_evaluator_service import (
+    count_unread_k8s_alarm_events,
+    list_k8s_alarm_events,
+    mark_k8s_alarm_event_read,
+    mark_k8s_alarm_events_read_all,
+)
 from app.k8s_alarm_monitor_service import (
     list_alarm_monitor_groups,
     list_alarm_monitor_services,
@@ -173,6 +181,7 @@ from app.services import (
     connection_environment_display,
     connection_is_database_type,
     connection_is_gitlab_type,
+    connection_is_k8s_type,
     connection_is_kafka_type,
     connection_is_mqtt_type,
     connection_is_redis_type,
@@ -632,6 +641,40 @@ def put_k8s_alarm_monitor_service(
     return update_alarm_monitor_service(db, cluster, namespace, service_name, data)
 
 
+@router.get(
+    "/k8s/clusters/{cluster_id}/alarm-events",
+    response_model=list[K8sAlarmEventOut],
+)
+def get_k8s_alarm_events(
+    cluster_id: int,
+    status: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    get_k8s_cluster(db, cluster_id)
+    return list_k8s_alarm_events(db, cluster_id, status=status, limit=limit)
+
+
+@router.get("/k8s/clusters/{cluster_id}/alarm-events/unread-count")
+def get_k8s_alarm_unread_count(cluster_id: int, db: Session = Depends(get_db)):
+    get_k8s_cluster(db, cluster_id)
+    return {"count": count_unread_k8s_alarm_events(db, cluster_id)}
+
+
+@router.patch(
+    "/k8s/alarm-events/{event_id}/read",
+    response_model=K8sAlarmEventOut,
+)
+def patch_k8s_alarm_event_read(event_id: int, db: Session = Depends(get_db)):
+    return mark_k8s_alarm_event_read(db, event_id)
+
+
+@router.post("/k8s/clusters/{cluster_id}/alarm-events/read-all")
+def post_k8s_alarm_events_read_all(cluster_id: int, db: Session = Depends(get_db)):
+    get_k8s_cluster(db, cluster_id)
+    return {"updated": mark_k8s_alarm_events_read_all(db, cluster_id)}
+
+
 @router.get("/kafka-console/connections", response_model=list[KafkaConsoleConnectionOut])
 def get_kafka_console_connections(db: Session = Depends(get_db)):
     return list_kafka_console_connections(db)
@@ -892,6 +935,13 @@ async def patch_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     old_enabled = dict(sub.link_enabled or {})
+    conn = sub.connection
+    if data.link_enabled and conn and connection_is_k8s_type(db, conn):
+        for link_key, enabled in data.link_enabled.items():
+            if enabled and not old_enabled.get(link_key):
+                from app.k8s_connection_service import validate_k8s_subscription_enable
+
+                validate_k8s_subscription_enable(db, conn)
     update_subscription(db, sub, data)
     db.refresh(sub)
     conn = sub.connection
@@ -1428,6 +1478,27 @@ async def post_ai_analysis(payload: AiAnalysisIn, db: Session = Depends(get_db))
         return AiAnalysisOut(**await run_ai_analysis(db, payload.model_dump()))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ai-analysis/stream")
+async def post_ai_analysis_stream(payload: AiAnalysisIn, db: Session = Depends(get_db)):
+    import json
+
+    from app.ai_analysis_service import stream_ai_analysis_events
+
+    async def event_generator():
+        async for event in stream_ai_analysis_events(db, payload.model_dump()):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/prompts", response_model=list[PromptTemplateOut])

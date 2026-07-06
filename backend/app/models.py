@@ -287,6 +287,13 @@ class K8sClusterConfig(Base):
     verify_ssl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    connection_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("connections.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -347,6 +354,57 @@ class K8sAlarmMonitorService(Base):
     cluster: Mapped["K8sClusterConfig"] = relationship(back_populates="alarm_monitor_services")
 
 
+class K8sAlarmMonitorSnapshot(Base):
+    __tablename__ = "k8s_alarm_monitor_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "cluster_id",
+            "namespace",
+            "service_name",
+            name="uq_k8s_alarm_monitor_snapshot",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cluster_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("k8s_cluster_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    namespace: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    service_name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    restart_count_snapshot: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pod_restart_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_restart_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    max_watermark_lag_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    restart_alert_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    watermark_alert_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_exception_timestamp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exception_alert_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class K8sAlarmEvent(Base):
+    __tablename__ = "k8s_alarm_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cluster_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("k8s_cluster_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    namespace: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    service_name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    alert_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class EmbedConsoleSession(Base):
     __tablename__ = "embed_console_sessions"
 
@@ -373,6 +431,7 @@ class RepoAccessSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     gitlab_base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     gitlab_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    gitlab_ssh_private_key: Mapped[str] = mapped_column(Text, nullable=False, default="")
     github_token: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     public_webhook_base_url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(

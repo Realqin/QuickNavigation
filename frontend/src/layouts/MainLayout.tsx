@@ -40,12 +40,27 @@ import {
   type AppTab,
   type PageType,
 } from '../types/tabs';
+import { clearK8sConnectionSession } from '../utils/k8sConnectionSession';
 
 const { Header, Sider, Content } = Layout;
 
 const MENU_ITEMS: MenuProps['items'] = [
   { key: 'home', icon: <HomeOutlined />, label: PAGE_LABELS.home },
+  { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
+  { key: 'apiMonitor', icon: <RadarChartOutlined />, label: PAGE_LABELS.apiMonitor },
+  { key: 'serviceMonitor', icon: <CloudServerOutlined />, label: PAGE_LABELS.serviceMonitor },
   { key: 'connections', icon: <LinkOutlined />, label: PAGE_LABELS.connections },
+  { key: 'apiCases', icon: <ExperimentOutlined />, label: PAGE_LABELS.apiCases },
+  {
+    key: CONFIG_MENU_KEY,
+    icon: <SettingOutlined />,
+    label: '配置管理',
+    children: [
+      { key: 'llmConfigs', icon: <RobotOutlined />, label: PAGE_LABELS.llmConfigs },
+      { key: 'prompts', icon: <FileTextOutlined />, label: PAGE_LABELS.prompts },
+      { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
+    ],
+  },
   {
     key: CONNECTION_METHOD_MENU_KEY,
     icon: <ApiOutlined />,
@@ -56,20 +71,6 @@ const MENU_ITEMS: MenuProps['items'] = [
       { key: 'methodRedis', icon: <CloudServerOutlined />, label: PAGE_LABELS.methodRedis },
       { key: 'methodMqtt', icon: <MessageOutlined />, label: PAGE_LABELS.methodMqtt },
       { key: 'methodKafka', icon: <ApiOutlined />, label: PAGE_LABELS.methodKafka },
-    ],
-  },
-  { key: 'logs', icon: <BellOutlined />, label: PAGE_LABELS.logs },
-  { key: 'apiMonitor', icon: <RadarChartOutlined />, label: PAGE_LABELS.apiMonitor },
-  { key: 'serviceMonitor', icon: <CloudServerOutlined />, label: PAGE_LABELS.serviceMonitor },
-  { key: 'apiCases', icon: <ExperimentOutlined />, label: PAGE_LABELS.apiCases },
-  {
-    key: CONFIG_MENU_KEY,
-    icon: <SettingOutlined />,
-    label: '配置管理',
-    children: [
-      { key: 'llmConfigs', icon: <RobotOutlined />, label: PAGE_LABELS.llmConfigs },
-      { key: 'prompts', icon: <FileTextOutlined />, label: PAGE_LABELS.prompts },
-      { key: 'dict', icon: <BookOutlined />, label: PAGE_LABELS.dict },
     ],
   },
 ];
@@ -151,6 +152,9 @@ export default function MainLayout() {
   const closeTab = useCallback(
     (targetKey: string) => {
       const type = targetKey as PageType;
+      if (type === 'serviceMonitor') {
+        clearK8sConnectionSession();
+      }
       setTabs((prev) => {
         if (prev.length <= 1) return prev;
         const nextTabs = prev.filter((t) => t.key !== type);
@@ -230,7 +234,6 @@ export default function MainLayout() {
                 }
               }}
               items={tabItems}
-              destroyOnHidden
             />
           </Content>
         </Layout>

@@ -1,4 +1,5 @@
 import {
+  BellOutlined,
   CloudSyncOutlined,
   DatabaseOutlined,
   EditOutlined,
@@ -33,6 +34,7 @@ import {
 } from '../api';
 import CommitAiAnalysisModal from '../components/CommitAiAnalysisModal';
 import ConnectionFormModal from '../components/ConnectionFormModal';
+import K8sAlarmMonitorPanel from '../components/K8sAlarmMonitorPanel';
 import RepoAccessSettingsModal from '../components/RepoAccessSettingsModal';
 import { useDictGroup } from '../hooks/useDict';
 import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
@@ -40,6 +42,7 @@ import type { ActivityLog, Connection, ConnectionFormValues, GitlabSubscriptionT
 import { extractCommitSha } from '../utils/activityLogDetail';
 import { formatBeijingTime } from '../utils/dateTime';
 import { getApiMonitorChangeCount, isApiMonitorChangeLog } from '../utils/apiMonitorChangeLog';
+import { getK8sAlarmAlertTypeLabel, isK8sAlarmActivityLog } from '../utils/k8sAlarmActivityLog';
 import { getSchemaChanges, isSchemaChangeLog } from '../utils/schemaChangeLog';
 import type { LogAiModalVariant } from '../utils/logAiModal';
 
@@ -48,7 +51,7 @@ const ENABLED_FILTER_OPTIONS = [
   { label: '未启用', value: false },
 ];
 
-const LOGS_PAGE_HINT = '获取 GitLab、数据库与接口监听的变更日志';
+const LOGS_PAGE_HINT = '获取 GitLab、数据库、K8s 与接口监听的变更日志';
 
 interface SubscriptionTableRow {
   key: string;
@@ -65,6 +68,7 @@ interface SubscriptionTableRow {
   enabled?: boolean;
   link_key?: string;
   isConnection: boolean;
+  cluster_id?: number | null;
   children?: SubscriptionTableRow[];
 }
 
@@ -92,6 +96,9 @@ function renderActor(log: ActivityLog): string | null {
   }
   if (log.source_type === 'api-monitor') {
     return log.author === 'api-monitor' ? '接口扫描' : log.author || '接口扫描';
+  }
+  if (log.source_type === 'k8s') {
+    return log.author === 'k8s-alarm-monitor' ? 'K8s 告警' : log.author || 'K8s 告警';
   }
   return null;
 }
@@ -135,6 +142,7 @@ function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] 
       branch: mainLink?.branch,
       enabled: mainLink?.enabled,
       link_key: mainLink ? 'main' : undefined,
+      cluster_id: mainLink?.cluster_id ?? null,
       isConnection: true,
     };
 
@@ -184,12 +192,17 @@ function isGitlabConnection(typeName?: string | null): boolean {
   return Boolean(typeName?.toLowerCase().includes('gitlab'));
 }
 
+function isK8sConnection(typeName?: string | null): boolean {
+  return Boolean(typeName?.toLowerCase().includes('k8s') || typeName?.includes('Kubernetes'));
+}
+
 export default function LogsPage() {
   const { projects, environments, labels, connectionGroups } = useDictGroup();
   const { openActivityLogDetail, detailModals } = useActivityLogDetail();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [subs, setSubs] = useState<GitlabSubscriptionTree[]>([]);
   const [loading, setLoading] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [logForm] = Form.useForm();
   const [subForm] = Form.useForm();
   const [aiLogId, setAiLogId] = useState<number | null>(null);
@@ -201,6 +214,8 @@ export default function LogsPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [alarmMonitorOpen, setAlarmMonitorOpen] = useState(false);
+  const [alarmClusterId, setAlarmClusterId] = useState<number | null>(null);
   const [scanningSubIds, setScanningSubIds] = useState<number[]>([]);
   const [syncingApiSubIds, setSyncingApiSubIds] = useState<number[]>([]);
 
@@ -217,16 +232,23 @@ export default function LogsPage() {
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
-    const filter = subForm.getFieldsValue();
-    const list = await fetchSubscriptions({
-      project: filter.project,
-      enabled: filter.enabled,
-    });
-    setSubs(list);
+    setLoading(true);
+    try {
+      const filter = subForm.getFieldsValue();
+      const list = await fetchSubscriptions({
+        project: filter.project,
+        enabled: filter.enabled,
+      });
+      setSubs(list);
+    } catch {
+      message.error('加载订阅失败');
+    } finally {
+      setLoading(false);
+    }
   }, [subForm]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
     try {
       const logFilter = logForm.getFieldsValue();
       const logList = await fetchLogs({
@@ -236,13 +258,16 @@ export default function LogsPage() {
         limit: 100,
       });
       setLogs(logList);
-      await loadSubscriptions();
     } catch {
-      message.error('加载失败');
+      message.error('加载活动日志失败');
     } finally {
-      setLoading(false);
+      setLogsLoading(false);
     }
-  }, [logForm, loadSubscriptions]);
+  }, [logForm]);
+
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadLogs(), loadSubscriptions()]);
+  }, [loadLogs, loadSubscriptions]);
 
   useEffect(() => {
     loadAll();
@@ -297,6 +322,13 @@ export default function LogsPage() {
         </Button>
       );
     }
+    if (isK8sAlarmActivityLog(log)) {
+      return (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openActivityLogDetail(log)}>
+          {getK8sAlarmAlertTypeLabel(log)}
+        </Button>
+      );
+    }
     const sha = extractCommitSha(log);
     if (!sha) return null;
     return (
@@ -332,6 +364,18 @@ export default function LogsPage() {
         </Button>
       );
     }
+    if (isK8sAlarmActivityLog(log)) {
+      return (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', whiteSpace: 'normal', textAlign: 'left' }}
+          onClick={() => openActivityLogDetail(log)}
+        >
+          {summary}
+        </Button>
+      );
+    }
     const sha = extractCommitSha(log);
     if (!sha) return summary;
     return (
@@ -347,7 +391,11 @@ export default function LogsPage() {
   };
 
   const handleSubFilterChange = () => {
-    loadSubscriptions().catch(() => message.error('加载订阅失败'));
+    loadSubscriptions().catch(() => undefined);
+  };
+
+  const handleLogFilterChange = () => {
+    loadLogs().catch(() => undefined);
   };
 
   const handleLinkToggle = async (subscriptionId: number, linkKey: string, checked: boolean) => {
@@ -357,8 +405,14 @@ export default function LogsPage() {
         message.success('已启用');
       }
       await loadSubscriptions();
-    } catch {
-      message.error('更新订阅失败');
+    } catch (error) {
+      const detail = extractScanError(error, '更新订阅失败');
+      Modal.warning({
+        title: checked ? '无法启用订阅' : '更新订阅失败',
+        content: detail,
+        closable: true,
+        okText: '知道了',
+      });
     }
   };
 
@@ -459,7 +513,7 @@ export default function LogsPage() {
             仓库访问配置
           </Button>
           <Button onClick={copyGitlabWebhook}>复制 GitLab Webhook</Button>
-          <Button icon={<ReloadOutlined />} onClick={loadAll} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={loadAll} loading={loading || logsLoading}>
             刷新
           </Button>
         </Space>
@@ -508,7 +562,7 @@ export default function LogsPage() {
           defaultExpandAllRows: true,
           rowExpandable: (record) => (record.children?.length ?? 0) > 0,
         }}
-        locale={{ emptyText: '暂无 GitLab / 数据库类型连接' }}
+        locale={{ emptyText: '暂无 GitLab / 数据库 / K8s 类型连接' }}
         columns={[
           {
             title: '名称',
@@ -657,6 +711,21 @@ export default function LogsPage() {
                       获取最新代码
                     </Button>
                   ) : null}
+                  {isK8sConnection(record.connection_type_name) ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<BellOutlined />}
+                      style={{ paddingInline: 0 }}
+                      disabled={!record.cluster_id}
+                      onClick={() => {
+                        setAlarmClusterId(record.cluster_id ?? null);
+                        setAlarmMonitorOpen(true);
+                      }}
+                    >
+                      报警监控
+                    </Button>
+                  ) : null}
                 </Space>
               );
             },
@@ -665,7 +734,12 @@ export default function LogsPage() {
       />
 
       <Typography.Title level={5}>活动日志</Typography.Title>
-      <Form form={logForm} layout="inline" style={{ marginBottom: 16 }} onFinish={loadAll}>
+      <Form
+        form={logForm}
+        layout="inline"
+        style={{ marginBottom: 16 }}
+        onValuesChange={handleLogFilterChange}
+      >
         <Form.Item name="project" label="项目">
           <Select allowClear style={{ width: 160 }} placeholder="项目" options={projects.options} />
         </Form.Item>
@@ -680,20 +754,16 @@ export default function LogsPage() {
             options={[
               { label: 'GitLab', value: 'gitlab' },
               { label: '数据库', value: 'database' },
+              { label: 'K8s', value: 'k8s' },
               { label: '接口监听', value: 'api-monitor' },
             ]}
           />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" htmlType="submit">
-            筛选
-          </Button>
         </Form.Item>
       </Form>
 
       <Table
         rowKey="id"
-        loading={loading}
+        loading={logsLoading}
         dataSource={logs}
         pagination={{ pageSize: 10 }}
         scroll={{ x: 1100 }}
@@ -790,6 +860,14 @@ export default function LogsPage() {
           setAiCommitSha(null);
           setAiSummary(null);
           setAiVariant('analysis');
+        }}
+      />
+      <K8sAlarmMonitorPanel
+        open={alarmMonitorOpen}
+        clusterId={alarmClusterId}
+        onClose={() => {
+          setAlarmMonitorOpen(false);
+          setAlarmClusterId(null);
         }}
       />
       {detailModals}

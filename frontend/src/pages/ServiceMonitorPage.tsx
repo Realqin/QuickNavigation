@@ -1,16 +1,17 @@
 import {
-  BellOutlined,
   ApiOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
   ClockCircleOutlined,
   CloudServerOutlined,
   DeleteOutlined,
+  DisconnectOutlined,
   EditOutlined,
   FileTextOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MinusOutlined,
+  NotificationOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -33,21 +34,23 @@ import {
   Typography,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   connectK8sCluster,
+  createNotifyWebSocket,
   deleteK8sCluster,
+  fetchK8sAlarmUnreadCount,
   fetchK8sClusters,
   fetchK8sProjects,
   fetchK8sServices,
   fetchK8sWatermarks,
   scaleK8sService,
-  syncK8sAlarmMonitor,
 } from '../api';
-import K8sAlarmMonitorPanel from '../components/K8sAlarmMonitorPanel';
+import K8sAlarmNotifyDrawer from '../components/K8sAlarmNotifyDrawer';
 import K8sClusterFormModal from '../components/K8sClusterFormModal';
 import K8sPodTerminalModal, { type K8sPodTerminalTarget } from '../components/K8sPodTerminalModal';
 import type {
+  K8sAlarmEvent,
   K8sClusterConfig,
   K8sConnectResult,
   K8sPod,
@@ -58,6 +61,13 @@ import type {
   K8sWatermarkValue,
 } from '../types/k8s';
 import { formatDateTime } from '../utils/dateTime';
+import { buildExternalServiceUrl, resolveK8sServiceOpenUrlFromService } from '../utils/k8sServiceUrl';
+import {
+  clearK8sConnectionSession,
+  readK8sConnectionSessionSnapshot,
+  updateK8sConnectionSession,
+} from '../utils/k8sConnectionSession';
+import { registerPageCleanup } from '../utils/pageCleanup';
 
 const TABLE_SCROLL_Y = 'calc(100vh - 300px)';
 
@@ -152,18 +162,6 @@ function podStatusColor(pod: K8sPod) {
   return 'red';
 }
 
-function buildExternalServiceUrl(cluster: K8sClusterConfig | null, port?: number) {
-  if (!cluster || !port) {
-    return '';
-  }
-  try {
-    const apiUrl = new URL(cluster.api_server);
-    return `${apiUrl.protocol}//${apiUrl.hostname}:${port}/#/overview`;
-  } catch {
-    return '';
-  }
-}
-
 function renderExternalPorts(
   service: K8sService,
   cluster: K8sClusterConfig | null,
@@ -255,16 +253,20 @@ function buildWatermarkTableRows(operators: K8sWatermarkOperator[]): WatermarkTa
 }
 
 export default function ServiceMonitorPage() {
-  const { message, modal } = App.useApp();
+  const { message, modal, notification } = App.useApp();
+  const restoredSession = useMemo(() => readK8sConnectionSessionSnapshot(), []);
+  const restoreLoadedRef = useRef(false);
   const [clusters, setClusters] = useState<K8sClusterConfig[]>([]);
   const [clustersLoading, setClustersLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [connectedId, setConnectedId] = useState<number | null>(null);
-  const [connectInfo, setConnectInfo] = useState<K8sConnectResult | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(
+    restoredSession.selectedId ?? restoredSession.connectedId,
+  );
+  const [connectedId, setConnectedId] = useState<number | null>(restoredSession.connectedId);
+  const [connectInfo, setConnectInfo] = useState<K8sConnectResult | null>(restoredSession.connectInfo);
   const [connecting, setConnecting] = useState(false);
-  const [projects, setProjects] = useState<K8sProject[]>([]);
+  const [projects, setProjects] = useState<K8sProject[]>(restoredSession.projects);
   const [projectLoading, setProjectLoading] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<string>();
+  const [selectedProject, setSelectedProject] = useState<string | undefined>(restoredSession.selectedProject);
   const [services, setServices] = useState<K8sService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -276,7 +278,9 @@ export default function ServiceMonitorPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [terminalTarget, setTerminalTarget] = useState<K8sPodTerminalTarget | null>(null);
-  const [alarmMonitorOpen, setAlarmMonitorOpen] = useState(false);
+  const [alarmNotifyOpen, setAlarmNotifyOpen] = useState(false);
+  const [alarmUnreadCount, setAlarmUnreadCount] = useState(0);
+  const [alarmRefreshToken, setAlarmRefreshToken] = useState(0);
   const [watermarkState, setWatermarkState] = useState<WatermarkState | null>(null);
   const [watermarkData, setWatermarkData] = useState<K8sWatermarkResult | null>(null);
   const [watermarkLoading, setWatermarkLoading] = useState(false);
@@ -301,15 +305,42 @@ export default function ServiceMonitorPage() {
     setWatermarkState(null);
     setWatermarkData(null);
     setWatermarkError('');
+    setAlarmUnreadCount(0);
+    setAlarmNotifyOpen(false);
+    clearK8sConnectionSession();
   }, []);
 
-  const syncAlarmMonitorData = useCallback(async (clusterId: number) => {
+  const refreshAlarmUnreadCount = useCallback(async (clusterId: number) => {
     try {
-      await syncK8sAlarmMonitor(clusterId);
-    } catch (error) {
-      message.error(getErrorMessage(error, '同步报警监控数据失败'));
+      const count = await fetchK8sAlarmUnreadCount(clusterId);
+      setAlarmUnreadCount(count);
+    } catch {
+      setAlarmUnreadCount(0);
     }
-  }, [message]);
+  }, []);
+
+  const handleK8sAlarmEvent = useCallback(
+    (event: K8sAlarmEvent) => {
+      if (connectedId != null && event.cluster_id !== connectedId) {
+        return;
+      }
+      setAlarmRefreshToken((prev) => prev + 1);
+      if (event.status === 'firing' && !event.is_read) {
+        setAlarmUnreadCount((prev) => prev + 1);
+        notification.warning({
+          message: event.title,
+          description: event.summary || `${event.namespace} / ${event.service_name}`,
+          placement: 'topRight',
+          duration: 8,
+        });
+        return;
+      }
+      if (connectedId != null) {
+        refreshAlarmUnreadCount(connectedId).catch(() => undefined);
+      }
+    },
+    [connectedId, notification, refreshAlarmUnreadCount],
+  );
 
   const loadClusters = useCallback(async () => {
     setClustersLoading(true);
@@ -362,22 +393,29 @@ export default function ServiceMonitorPage() {
     [message],
   );
 
+  const applyProjects = useCallback(
+    async (clusterId: number, list: K8sProject[], preferredProject?: string) => {
+      setProjects(list);
+      const nextProject =
+        preferredProject && list.some((item) => item.name === preferredProject)
+          ? preferredProject
+          : list[0]?.name;
+      setSelectedProject(nextProject);
+      if (nextProject) {
+        await loadServices(clusterId, nextProject);
+      } else {
+        setServices([]);
+      }
+    },
+    [loadServices],
+  );
+
   const loadProjects = useCallback(
     async (clusterId: number, preferredProject?: string) => {
       setProjectLoading(true);
       try {
         const list = await fetchK8sProjects(clusterId);
-        setProjects(list);
-        const nextProject =
-          preferredProject && list.some((item) => item.name === preferredProject)
-            ? preferredProject
-            : list[0]?.name;
-        setSelectedProject(nextProject);
-        if (nextProject) {
-          await loadServices(clusterId, nextProject);
-        } else {
-          setServices([]);
-        }
+        await applyProjects(clusterId, list, preferredProject);
       } catch (error) {
         setProjects([]);
         setSelectedProject(undefined);
@@ -387,7 +425,7 @@ export default function ServiceMonitorPage() {
         setProjectLoading(false);
       }
     },
-    [loadServices, message],
+    [applyProjects, message],
   );
 
   useEffect(() => {
@@ -395,10 +433,60 @@ export default function ServiceMonitorPage() {
   }, [loadClusters]);
 
   useEffect(() => {
-    if (connectedId) {
-      syncAlarmMonitorData(connectedId).catch(() => undefined);
+    if (connectedId == null) {
+      return;
     }
-  }, [connectedId, syncAlarmMonitorData]);
+    updateK8sConnectionSession({
+      connectedId,
+      connectInfo,
+      selectedId,
+      selectedProject,
+      projects,
+    });
+  }, [connectedId, connectInfo, selectedId, selectedProject, projects]);
+
+  useEffect(() => {
+    if (restoreLoadedRef.current || restoredSession.connectedId == null) {
+      return;
+    }
+    restoreLoadedRef.current = true;
+    const clusterId = restoredSession.connectedId;
+    if (restoredSession.selectedProject) {
+      loadServices(clusterId, restoredSession.selectedProject).catch(() => undefined);
+      return;
+    }
+    loadProjects(clusterId, restoredSession.selectedProject).catch(() => undefined);
+  }, [loadProjects, loadServices, restoredSession.connectedId, restoredSession.selectedProject]);
+
+  useEffect(() => {
+    return registerPageCleanup((reason) => {
+      if (reason === 'unload') {
+        clearK8sConnectionSession();
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (connectedId) {
+      refreshAlarmUnreadCount(connectedId).catch(() => undefined);
+    } else {
+      setAlarmUnreadCount(0);
+    }
+  }, [connectedId, refreshAlarmUnreadCount]);
+
+  useEffect(() => {
+    const handle = createNotifyWebSocket({
+      onK8sAlarm: handleK8sAlarmEvent,
+    });
+    return () => {
+      handle.close();
+    };
+  }, [handleK8sAlarmEvent]);
+
+  const handleDisconnect = () => {
+    clearRuntimeData();
+    message.info('已取消连接');
+  };
 
   const handleConnect = async () => {
     if (!selectedCluster) {
@@ -410,8 +498,26 @@ export default function ServiceMonitorPage() {
       const result = await connectK8sCluster(selectedCluster.id);
       setConnectedId(selectedCluster.id);
       setConnectInfo(result);
-      await loadClusters();
-      await loadProjects(selectedCluster.id, selectedProject);
+      setClusters((prev) =>
+        prev.map((item) =>
+          item.id === selectedCluster.id
+            ? {
+                ...item,
+                last_connected_at: result.last_connected_at || new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
+      if (Array.isArray(result.projects)) {
+        setProjectLoading(true);
+        try {
+          await applyProjects(selectedCluster.id, result.projects, selectedProject);
+        } finally {
+          setProjectLoading(false);
+        }
+      } else {
+        await loadProjects(selectedCluster.id, selectedProject);
+      }
       message.success(`${selectedCluster.name} 连接成功`);
     } catch (error) {
       clearRuntimeData();
@@ -674,7 +780,12 @@ export default function ServiceMonitorPage() {
           }
           const { service } = row;
           const expanded = expandedServiceIds.has(service.id);
-          const externalUrl = buildExternalServiceUrl(connectedCluster, service.external_ports[0]);
+          const serviceUrl = resolveK8sServiceOpenUrlFromService(connectedCluster, service);
+          const kubesphereUrl =
+            connectedCluster?.provider === 'kubesphere' &&
+            Boolean(service.workload_kind && service.workload_name)
+              ? serviceUrl
+              : '';
           return (
             <div className="service-monitor-page__service-name">
               {service.pods.length ? (
@@ -690,12 +801,13 @@ export default function ServiceMonitorPage() {
               )}
               <span className="service-monitor-page__service-icon" />
               <div>
-                {externalUrl ? (
+                {serviceUrl ? (
                   <a
-                    href={externalUrl}
+                    href={serviceUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="service-monitor-page__service-link"
+                    title={kubesphereUrl ? '在 KubeSphere 控制台中打开' : undefined}
                   >
                     <Typography.Text strong>{service.service_name}</Typography.Text>
                   </a>
@@ -844,6 +956,8 @@ export default function ServiceMonitorPage() {
     [connectedCluster, expandedServiceIds, openWatermarks, operationKeys, watermarkLoading, watermarkState],
   );
 
+  const isConnectedToSelected = connectedId != null && selectedCluster?.id === connectedId;
+
   return (
     <div
       className={`service-monitor-page${
@@ -886,12 +1000,18 @@ export default function ServiceMonitorPage() {
           <Button
             type="primary"
             size="small"
-            icon={<ApiOutlined />}
+            icon={isConnectedToSelected ? <DisconnectOutlined /> : <ApiOutlined />}
             loading={connecting}
             disabled={!selectedCluster}
-            onClick={handleConnect}
+            onClick={() => {
+              if (isConnectedToSelected) {
+                handleDisconnect();
+                return;
+              }
+              handleConnect().catch(() => undefined);
+            }}
           >
-            连接
+            {isConnectedToSelected ? '取消连接' : '连接'}
           </Button>
         </Space>
 
@@ -1026,13 +1146,15 @@ export default function ServiceMonitorPage() {
                   onChange={(event) => setKeyword(event.target.value)}
                   style={{ width: 280 }}
                 />
-                <Button
-                  icon={<BellOutlined />}
-                  disabled={!connectedId}
-                  onClick={() => setAlarmMonitorOpen(true)}
-                >
-                  报警监控
-                </Button>
+                <Badge count={alarmUnreadCount} size="small" offset={[-4, 4]}>
+                  <Button
+                    icon={<NotificationOutlined />}
+                    disabled={!connectedId}
+                    onClick={() => setAlarmNotifyOpen(true)}
+                  >
+                    站内报警
+                  </Button>
+                </Badge>
                 <Button
                   icon={<ReloadOutlined />}
                   loading={projectLoading || servicesLoading}
@@ -1087,10 +1209,12 @@ export default function ServiceMonitorPage() {
         onSaved={handleSaved}
       />
 
-      <K8sAlarmMonitorPanel
-        open={alarmMonitorOpen}
+      <K8sAlarmNotifyDrawer
+        open={alarmNotifyOpen}
         clusterId={connectedId}
-        onClose={() => setAlarmMonitorOpen(false)}
+        onClose={() => setAlarmNotifyOpen(false)}
+        onUnreadChange={setAlarmUnreadCount}
+        refreshToken={alarmRefreshToken}
       />
 
       <K8sPodTerminalModal

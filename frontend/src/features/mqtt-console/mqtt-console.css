@@ -195,30 +195,32 @@
 .mqtt-console__message-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .mqtt-console__message-item {
   box-sizing: border-box;
-  padding: 2px 0;
+  padding: 1px 0;
 }
 
 .mqtt-console__message-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 4px;
+  min-width: 0;
+  margin-bottom: 2px;
 }
 
 .mqtt-console__message-payload {
   margin: 0;
-  padding: 6px 10px;
+  padding: 5px 8px;
   border-radius: 6px;
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 13px;
   line-height: 1.4;
-  max-height: 120px;
+  max-height: 96px;
   overflow: auto;
 }
 
@@ -260,5 +262,64 @@
 
   .mqtt-console__subscription-panel .ant-card-body {
     max-height: none;
+  }
+}
+
+.mqtt-console__message-list--virtual {
+  position: relative;
+  display: block;
+  gap: 0;
+  width: 100%;
+}
+
+.mqtt-console__message-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  padding-bottom: 6px;
+  will-change: transform;
+}
+
+.mqtt-console__message-meta-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mqtt-console__message-topic {
+  min-width: 0;
+  max-width: min(520px, 42vw);
+}
+
+.mqtt-console__message-code {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mqtt-console__message-time {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.mqtt-console__filter-bar {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mqtt-console__filter-input {
+  width: 220px;
+}
+
+@media (max-width: 1200px) {
+  .mqtt-console__filter-input {
+    width: 180px;
   }
 }

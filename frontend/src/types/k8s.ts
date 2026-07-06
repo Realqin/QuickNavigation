@@ -32,7 +32,9 @@ export interface K8sConnectResult {
   cluster_id: number;
   version: string;
   namespace_count: number;
+  projects?: K8sProject[];
   latency_ms?: number | null;
+  last_connected_at?: string | null;
 }
 
 export interface K8sProject {
@@ -153,6 +155,25 @@ export interface K8sAlarmMonitorSyncResult {
   groups_count: number;
   services_count: number;
   namespaces: string[];
+}
+
+export type K8sAlarmType = 'restart' | 'watermark' | 'exception';
+export type K8sAlarmStatus = 'firing' | 'resolved';
+
+export interface K8sAlarmEvent {
+  id: number;
+  cluster_id: number;
+  cluster_name: string;
+  namespace: string;
+  service_name: string;
+  alert_type: K8sAlarmType;
+  status: K8sAlarmStatus;
+  title: string;
+  summary?: string | null;
+  payload?: Record<string, unknown> | null;
+  is_read: boolean;
+  occurred_at: string;
+  resolved_at?: string | null;
 }
 
 export const K8S_RESTART_MONITOR_OPTIONS: Array<{

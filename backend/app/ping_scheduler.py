@@ -2,15 +2,16 @@ import asyncio
 import logging
 from datetime import datetime
 
+import httpx
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import SessionLocal
 from app.models import Connection
-from app.ping_service import ping_urls
+from app.ping_service import PING_CONCURRENCY, PING_TIMEOUT, ping_urls_with_client
 
 logger = logging.getLogger(__name__)
 
-PING_INTERVAL_SECONDS = 180
+PING_INTERVAL_SECONDS = 900
 
 
 def _update_sub_link_status(sub_links: list, index: int, reachable: bool, checked_at: datetime) -> list:
@@ -73,7 +74,7 @@ def _apply_ping_results(connection: Connection, results: dict[str, bool], checke
     flag_modified(connection, "sub_links")
 
 
-async def ping_all_connections() -> int:
+async def ping_all_connections(*, client: httpx.AsyncClient) -> int:
     db = SessionLocal()
     try:
         connections = db.query(Connection).all()
@@ -90,7 +91,11 @@ async def ping_all_connections() -> int:
                 if sub_url:
                     urls.append(sub_url)
 
-        reachability = dict(zip(urls, await ping_urls(urls), strict=False)) if urls else {}
+        reachability = (
+            dict(zip(urls, await ping_urls_with_client(urls, client=client), strict=False))
+            if urls
+            else {}
+        )
         checked_at = datetime.utcnow()
         for connection in connections:
             _apply_ping_results(connection, reachability, checked_at)
@@ -102,10 +107,17 @@ async def ping_all_connections() -> int:
 
 
 async def connection_ping_scheduler() -> None:
-    while True:
-        try:
-            count = await ping_all_connections()
-            logger.info("Scheduled ping completed for %s connections", count)
-        except Exception:
-            logger.exception("Scheduled ping failed")
-        await asyncio.sleep(PING_INTERVAL_SECONDS)
+    limits = httpx.Limits(max_connections=PING_CONCURRENCY, max_keepalive_connections=PING_CONCURRENCY)
+    async with httpx.AsyncClient(
+        timeout=PING_TIMEOUT,
+        follow_redirects=True,
+        verify=False,
+        limits=limits,
+    ) as client:
+        while True:
+            try:
+                count = await ping_all_connections(client=client)
+                logger.info("Scheduled ping completed for %s connections", count)
+            except Exception:
+                logger.exception("Scheduled ping failed")
+            await asyncio.sleep(PING_INTERVAL_SECONDS)

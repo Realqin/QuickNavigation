@@ -48,6 +48,7 @@ import type {
   K8sAlarmMonitorGroup,
   K8sAlarmMonitorService,
   K8sAlarmMonitorSyncResult,
+  K8sAlarmEvent,
   K8sRestartMonitorOption,
 } from '../types/k8s';
 
@@ -172,7 +173,7 @@ export async function syncK8sAlarmMonitor(clusterId: number): Promise<K8sAlarmMo
   const { data } = await client.post<K8sAlarmMonitorSyncResult>(
     `/api/k8s/clusters/${clusterId}/alarm-monitor/sync`,
     null,
-    { timeout: 600000 },
+    { timeout: 120000 },
   );
   return data;
 }
@@ -558,19 +559,114 @@ export async function updateSubscription(
   return data;
 }
 
-export function createLogsWebSocket(onMessage: (log: ActivityLog) => void): WebSocket {
-  const ws = new WebSocket(buildLogsWebSocketUrl());
-  ws.onmessage = (event) => {
+export interface NotifyWebSocketHandle {
+  close: () => void;
+}
+
+const NOTIFY_WS_RECONNECT_MS = 3000;
+
+export function createLogsWebSocket(onMessage: (log: ActivityLog) => void): NotifyWebSocketHandle {
+  return createNotifyWebSocket({ onLog: onMessage });
+}
+
+export function createNotifyWebSocket(handlers: {
+  onLog?: (log: ActivityLog) => void;
+  onK8sAlarm?: (event: K8sAlarmEvent) => void;
+}): NotifyWebSocketHandle {
+  let ws: WebSocket | null = null;
+  let disposed = false;
+  let reconnectTimer: number | undefined;
+
+  const dispatch = (event: MessageEvent) => {
     try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'log:new' && msg.data) {
-        onMessage(msg.data as ActivityLog);
+      const msg = JSON.parse(event.data as string);
+      if (msg.type === 'log:new' && msg.data && handlers.onLog) {
+        handlers.onLog(msg.data as ActivityLog);
+      }
+      if (msg.type === 'k8s-alarm:new' && msg.data && handlers.onK8sAlarm) {
+        handlers.onK8sAlarm(msg.data as K8sAlarmEvent);
       }
     } catch {
       // ignore malformed messages
     }
   };
-  return ws;
+
+  const connect = () => {
+    if (disposed || document.hidden) {
+      return;
+    }
+    ws = new WebSocket(buildLogsWebSocketUrl());
+    ws.onmessage = dispatch;
+    ws.onclose = () => {
+      ws = null;
+      if (!disposed && !document.hidden) {
+        reconnectTimer = window.setTimeout(connect, NOTIFY_WS_RECONNECT_MS);
+      }
+    };
+    ws.onerror = () => {
+      ws?.close();
+    };
+  };
+
+  const onVisibilityChange = () => {
+    if (document.hidden) {
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      ws?.close();
+      ws = null;
+      return;
+    }
+    if (!disposed) {
+      connect();
+    }
+  };
+
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  connect();
+
+  return {
+    close: () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+      ws?.close();
+      ws = null;
+    },
+  };
+}
+
+export async function fetchK8sAlarmEvents(
+  clusterId: number,
+  params?: { status?: string; limit?: number },
+): Promise<K8sAlarmEvent[]> {
+  const { data } = await client.get<K8sAlarmEvent[]>(
+    `/api/k8s/clusters/${clusterId}/alarm-events`,
+    { params },
+  );
+  return data;
+}
+
+export async function fetchK8sAlarmUnreadCount(clusterId: number): Promise<number> {
+  const { data } = await client.get<{ count: number }>(
+    `/api/k8s/clusters/${clusterId}/alarm-events/unread-count`,
+  );
+  return data.count;
+}
+
+export async function markK8sAlarmEventRead(eventId: number): Promise<K8sAlarmEvent> {
+  const { data } = await client.patch<K8sAlarmEvent>(`/api/k8s/alarm-events/${eventId}/read`);
+  return data;
+}
+
+export async function markK8sAlarmEventsReadAll(clusterId: number): Promise<number> {
+  const { data } = await client.post<{ updated: number }>(
+    `/api/k8s/clusters/${clusterId}/alarm-events/read-all`,
+  );
+  return data.updated;
 }
 
 export async function fetchDictItems(type?: DictType): Promise<DictItem[]> {
@@ -674,6 +770,7 @@ export async function resetSchemaMonitorBaseline(
 export async function updateRepoAccessSettings(payload: {
   gitlab_base_url?: string;
   gitlab_token?: string;
+  gitlab_ssh_private_key?: string;
   github_token?: string;
   public_webhook_base_url?: string;
 }): Promise<RepoAccessSettings> {

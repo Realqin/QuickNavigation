@@ -54,6 +54,7 @@ LABEL_TERMINAL = "终端模拟器"
 LABEL_REDIS = "Redis"
 LABEL_MQTT = "MQTT"
 LABEL_KAFKA = "Kafka"
+LABEL_K8S = "K8s"
 LABEL_GITLAB = "GitLab 仓库"
 SYSTEM_LABEL_NAMES = {
     LABEL_OTHER,
@@ -62,6 +63,7 @@ SYSTEM_LABEL_NAMES = {
     LABEL_REDIS,
     LABEL_MQTT,
     LABEL_KAFKA,
+    LABEL_K8S,
     LABEL_GITLAB,
 }
 
@@ -209,6 +211,8 @@ def get_label_kind(db: Session, type_id: int) -> str:
         return "mqtt"
     if item.name == LABEL_KAFKA:
         return "kafka"
+    if item.name == LABEL_K8S:
+        return "k8s"
     if item.name == LABEL_GITLAB or "gitlab" in item.name.lower():
         return "gitlab"
     return "other"
@@ -240,6 +244,8 @@ def _build_connection_url(kind: str, data: dict[str, Any]) -> str:
 
         brokers = format_kafka_brokers(host, port)
         return f"kafka://{brokers}" if brokers else ""
+    if kind == "k8s":
+        return str(data.get("url") or data.get("host") or "").strip()
     return str(data.get("url") or "").strip()
 
 
@@ -251,6 +257,11 @@ def _validate_connection_by_kind(kind: str, data: dict[str, Any], *, require_pas
     if kind == "other":
         if not str(data.get("url") or "").strip():
             raise HTTPException(status_code=400, detail="请输入 URL")
+        return
+
+    if kind == "k8s":
+        if not str(data.get("url") or data.get("host") or "").strip():
+            raise HTTPException(status_code=400, detail="请输入集群访问地址")
         return
 
     if not str(data.get("host") or "").strip():
@@ -302,6 +313,17 @@ def _clear_connection_fields_for_kind(kind: str, data: dict[str, Any]) -> dict[s
                     }
                 )
         payload["sub_links"] = cleaned_sub_links
+        return payload
+    if kind == "k8s":
+        from app.k8s_connection_service import apply_k8s_connection_fields
+
+        payload = apply_k8s_connection_fields(payload)
+        payload["username"] = str(payload.get("username") or "").strip() or None
+        password = str(payload.get("password") or "").strip()
+        if password:
+            payload["password"] = password
+        else:
+            payload.pop("password", None)
         return payload
     if kind == "other":
         for key in ("host", "port", "username", "password", "database_name"):
@@ -850,6 +872,12 @@ def create_connection(db: Session, data: ConnectionCreate) -> Connection:
 
     ensure_database_subscription(db, conn)
 
+    ensure_k8s_subscription(db, conn)
+
+    from app.k8s_connection_service import sync_k8s_cluster_from_connection
+
+    sync_k8s_cluster_from_connection(db, conn)
+
     return conn
 
 
@@ -942,20 +970,18 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
 
     ensure_database_subscription(db, conn)
 
+    ensure_k8s_subscription(db, conn)
+
+    from app.k8s_connection_service import sync_k8s_cluster_from_connection
+
+    sync_k8s_cluster_from_connection(db, conn)
+
     return conn
 
 
-
-
-
 def delete_connection(db: Session, conn: Connection) -> None:
-
     db.delete(conn)
-
     db.commit()
-
-
-
 
 
 def batch_delete_connections(db: Session, ids: list[int]) -> int:
@@ -996,13 +1022,18 @@ def _database_label_ids(db: Session) -> set[int]:
     return {item.id for item in items if item.name == LABEL_DATABASE}
 
 
+def _k8s_label_ids(db: Session) -> set[int]:
+    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
+    return {item.id for item in items if item.name == LABEL_K8S}
+
+
 def _terminal_label_ids(db: Session) -> set[int]:
     items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
     return {item.id for item in items if item.name == LABEL_TERMINAL}
 
 
 def _subscription_label_ids(db: Session) -> set[int]:
-    return _gitlab_label_ids(db) | _database_label_ids(db)
+    return _gitlab_label_ids(db) | _database_label_ids(db) | _k8s_label_ids(db)
 
 
 def connection_is_gitlab_type(db: Session, conn: Connection) -> bool:
@@ -1011,6 +1042,10 @@ def connection_is_gitlab_type(db: Session, conn: Connection) -> bool:
 
 def connection_is_database_type(db: Session, conn: Connection) -> bool:
     return conn.type in _database_label_ids(db)
+
+
+def connection_is_k8s_type(db: Session, conn: Connection) -> bool:
+    return conn.type in _k8s_label_ids(db)
 
 
 def connection_is_terminal_type(db: Session, conn: Connection) -> bool:
@@ -1227,6 +1262,16 @@ def _last_updated_for_subscription_link(
                 latest = ts
         return latest
 
+    if link.get("link_kind") == "k8s":
+        latest: datetime | None = None
+        for log in logs:
+            if log.source_type != "k8s":
+                continue
+            ts = _activity_display_time(log)
+            if latest is None or ts > latest:
+                latest = ts
+        return latest
+
     repo_path = str(link.get("repo_path") or "").strip()
     branch = str(link.get("branch") or "").strip()
     if not repo_path or not branch or branch == "-":
@@ -1269,6 +1314,7 @@ def list_gitlab_subscription_trees(
 ) -> list[dict[str, Any]]:
     sync_gitlab_subscriptions(db)
     sync_database_subscriptions(db)
+    sync_k8s_subscriptions(db)
     label_ids = _subscription_label_ids(db)
     if not label_ids:
         return []
@@ -1292,6 +1338,22 @@ def list_gitlab_subscription_trees(
             links = build_gitlab_subscription_links(conn, sub.link_enabled)
         elif connection_is_database_type(db, conn):
             links = build_database_subscription_links(conn, sub, sub.link_enabled)
+        elif connection_is_k8s_type(db, conn):
+            from app.k8s_connection_service import (
+                build_k8s_subscription_links,
+                get_k8s_cluster_by_connection_id,
+                sync_k8s_cluster_from_connection,
+            )
+
+            cluster = get_k8s_cluster_by_connection_id(db, conn.id) or sync_k8s_cluster_from_connection(
+                db, conn
+            )
+            links = build_k8s_subscription_links(
+                conn,
+                sub,
+                sub.link_enabled,
+                cluster_id=cluster.id if cluster else None,
+            )
         else:
             continue
         if not links:
@@ -1387,6 +1449,36 @@ def sync_database_subscriptions(db: Session) -> None:
     )
     for conn in connections:
         ensure_database_subscription(db, conn)
+
+
+def ensure_k8s_subscription(db: Session, conn: Connection) -> Subscription | None:
+    if not connection_is_k8s_type(db, conn):
+        return conn.subscription
+    if conn.subscription:
+        return conn.subscription
+    sub = create_subscription(
+        db,
+        SubscriptionCreate(connection_id=conn.id, enabled=False),
+    )
+    db.refresh(conn)
+    return sub
+
+
+def sync_k8s_subscriptions(db: Session) -> None:
+    label_ids = _k8s_label_ids(db)
+    if not label_ids:
+        return
+    connections = (
+        db.query(Connection)
+        .filter(Connection.type.in_(label_ids))
+        .options(joinedload(Connection.subscription))
+        .all()
+    )
+    for conn in connections:
+        ensure_k8s_subscription(db, conn)
+        from app.k8s_connection_service import sync_k8s_cluster_from_connection
+
+        sync_k8s_cluster_from_connection(db, conn)
 
 
 def ensure_gitlab_subscription(db: Session, conn: Connection) -> Subscription | None:
@@ -1497,46 +1589,66 @@ def get_activity_log(db: Session, log_id: int) -> ActivityLog | None:
 
 
 async def get_or_fetch_log_diff(db: Session, log: ActivityLog) -> dict[str, Any]:
-    from app.repo_service import extract_commit_sha, fetch_commit_diff
+    from app.repo_access_service import sync_repo_access_cache_from_db
+    from app.repo_service import (
+        build_gitlab_clone_url,
+        extract_commit_sha,
+        fetch_commit_diff,
+        _resolve_log_clone_url,
+    )
 
+    sync_repo_access_cache_from_db(db)
     payload = dict(log.payload or {})
     commit_sha = extract_commit_sha(payload)
     repo = payload.get("repo")
     provider = str(payload.get("provider") or "github")
-    if not commit_sha or not repo:
-        return {
-            "log_id": log.id,
-            "commit_sha": commit_sha,
-            "diff": payload.get("diff") or "",
-            "repo": repo,
-            "branch": payload.get("branch"),
-            "provider": provider,
-        }
-
-    cached = payload.get("diff")
-    if isinstance(cached, str) and cached:
-        return {
-            "log_id": log.id,
-            "commit_sha": commit_sha,
-            "diff": cached,
-            "repo": repo,
-            "branch": payload.get("branch"),
-            "provider": provider,
-        }
-
-    diff = await fetch_commit_diff(provider, str(repo), str(commit_sha))
-    payload["diff"] = diff
-    log.payload = payload
-    db.commit()
-    db.refresh(log)
-    return {
+    base_out = {
         "log_id": log.id,
         "commit_sha": commit_sha,
-        "diff": diff,
+        "diff": "",
         "repo": repo,
         "branch": payload.get("branch"),
         "provider": provider,
+        "message": None,
     }
+    if not commit_sha or not repo:
+        base_out["diff"] = payload.get("diff") or ""
+        return base_out
+
+    cached = payload.get("diff")
+    if isinstance(cached, str) and cached.strip():
+        base_out["diff"] = cached
+        return base_out
+
+    clone_url = _resolve_log_clone_url(db, log, str(repo), provider)
+    branch = str(payload.get("branch") or "").strip() or None
+    result = await fetch_commit_diff(
+        provider,
+        str(repo),
+        str(commit_sha),
+        clone_url=clone_url,
+        branch=branch,
+        subscription_id=log.subscription_id,
+    )
+    base_out["diff"] = result.diff
+    base_out["message"] = result.error
+    if result.diff:
+        payload["diff"] = result.diff
+        payload.pop("diff_error", None)
+        log.payload = payload
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(log, "payload")
+        db.commit()
+        db.refresh(log)
+    elif result.error:
+        payload["diff_error"] = result.error
+        log.payload = payload
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(log, "payload")
+        db.commit()
+    return base_out
 
 
 
@@ -1570,7 +1682,7 @@ def list_activity_logs(
 
         query = query.filter(ActivityLog.source_type == source_type)
     else:
-        query = query.filter(ActivityLog.source_type.in_(["gitlab", "database", "api-monitor"]))
+        query = query.filter(ActivityLog.source_type.in_(["gitlab", "database", "api-monitor", "k8s"]))
 
     return query.order_by(ActivityLog.occurred_at.desc()).limit(limit).all()
 

@@ -96,6 +96,7 @@ export interface ActivityLogDiff {
   repo?: string | null;
   branch?: string | null;
   provider?: string | null;
+  message?: string | null;
 }
 
 export interface GitlabSubscriptionLink {
@@ -106,7 +107,8 @@ export interface GitlabSubscriptionLink {
   branch: string;
   repo_path?: string;
   enabled: boolean;
-  link_kind?: 'gitlab' | 'database';
+  link_kind?: 'gitlab' | 'database' | 'k8s';
+  cluster_id?: number | null;
   webhook_secret?: string | null;
   last_updated_at?: string | null;
   api_scan_status?: string | null;
@@ -127,6 +129,7 @@ export interface RepoAccessSettings {
   gitlab_base_url: string;
   gitlab_token_set: boolean;
   gitlab_token_hint?: string | null;
+  gitlab_ssh_key_set: boolean;
   github_token_set: boolean;
   github_token_hint?: string | null;
   public_webhook_base_url: string;
@@ -198,6 +201,7 @@ export interface ConnectionTestPayload {
   username?: string;
   password?: string;
   database_name?: string;
+  connection_id?: number;
 }
 
 export interface ConnectionTestResult {

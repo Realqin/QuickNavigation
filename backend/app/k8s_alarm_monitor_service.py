@@ -1,9 +1,15 @@
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.k8s_monitor_service import get_k8s_cluster, list_k8s_projects, list_k8s_services
+from app.k8s_monitor_service import (
+    K8sClusterHttpSession,
+    get_k8s_cluster,
+    list_k8s_projects,
+    list_k8s_services,
+)
 from app.models import K8sAlarmMonitorGroup, K8sAlarmMonitorService, K8sClusterConfig
 from app.schemas import K8sAlarmMonitorGroupUpdate, K8sAlarmMonitorServiceUpdate
 
@@ -78,8 +84,19 @@ def _get_or_create_group(
     return row
 
 
-def _sync_namespace_services(db: Session, cluster: K8sClusterConfig, namespace: str) -> int:
-    live_services = list_k8s_services(cluster, namespace)
+def _sync_namespace_services(
+    db: Session,
+    cluster: K8sClusterConfig,
+    namespace: str,
+    *,
+    http_client: httpx.Client | None = None,
+) -> int:
+    live_services = list_k8s_services(
+        cluster,
+        namespace,
+        http_client=http_client,
+        include_pods=False,
+    )
     live_names = sorted(
         {
             str(item.get("service_name") or "").strip()
@@ -117,6 +134,47 @@ def _sync_namespace_services(db: Session, cluster: K8sClusterConfig, namespace: 
     return len(live_names)
 
 
+def _remove_stale_groups(db: Session, cluster_id: int, live_namespaces: set[str]) -> None:
+    stale_groups = (
+        db.query(K8sAlarmMonitorGroup)
+        .filter(K8sAlarmMonitorGroup.cluster_id == cluster_id)
+        .all()
+    )
+    for group in stale_groups:
+        if group.namespace in live_namespaces:
+            continue
+        (
+            db.query(K8sAlarmMonitorService)
+            .filter(
+                K8sAlarmMonitorService.cluster_id == cluster_id,
+                K8sAlarmMonitorService.namespace == group.namespace,
+            )
+            .delete(synchronize_session=False)
+        )
+        db.delete(group)
+
+
+def _sync_alarm_monitor_groups(
+    db: Session,
+    cluster: K8sClusterConfig,
+    *,
+    http_client: httpx.Client,
+) -> list[str]:
+    """仅拉取项目/命名空间列表并入库，不逐个同步服务。"""
+    projects = list_k8s_projects(cluster, http_client=http_client)
+    namespaces: list[str] = []
+    for project in projects:
+        name = str(project.get("name") or "").strip()
+        if not name:
+            continue
+        _get_or_create_group(db, cluster.id, name, commit=False)
+        namespaces.append(name)
+
+    _remove_stale_groups(db, cluster.id, set(namespaces))
+    db.commit()
+    return namespaces
+
+
 def sync_alarm_monitor_data(
     db: Session,
     cluster: K8sClusterConfig,
@@ -127,8 +185,14 @@ def sync_alarm_monitor_data(
         namespace = namespace.strip()
         if not namespace:
             raise HTTPException(status_code=400, detail="分组名称不能为空")
-        _get_or_create_group(db, cluster.id, namespace, commit=False)
-        services_count = _sync_namespace_services(db, cluster, namespace)
+        with K8sClusterHttpSession(cluster) as session:
+            _get_or_create_group(db, cluster.id, namespace, commit=False)
+            services_count = _sync_namespace_services(
+                db,
+                cluster,
+                namespace,
+                http_client=session.client,
+            )
         db.commit()
         return {
             "groups_count": 1,
@@ -136,40 +200,12 @@ def sync_alarm_monitor_data(
             "namespaces": [namespace],
         }
 
-    projects = list_k8s_projects(cluster)
-    namespaces: list[str] = []
-    services_count = 0
-    for project in projects:
-        name = str(project.get("name") or "").strip()
-        if not name:
-            continue
-        _get_or_create_group(db, cluster.id, name, commit=False)
-        services_count += _sync_namespace_services(db, cluster, name)
-        namespaces.append(name)
+    with K8sClusterHttpSession(cluster) as session:
+        namespaces = _sync_alarm_monitor_groups(db, cluster, http_client=session.client)
 
-    if namespaces:
-        live_set = set(namespaces)
-        stale_groups = (
-            db.query(K8sAlarmMonitorGroup)
-            .filter(K8sAlarmMonitorGroup.cluster_id == cluster.id)
-            .all()
-        )
-        for group in stale_groups:
-            if group.namespace not in live_set:
-                (
-                    db.query(K8sAlarmMonitorService)
-                    .filter(
-                        K8sAlarmMonitorService.cluster_id == cluster.id,
-                        K8sAlarmMonitorService.namespace == group.namespace,
-                    )
-                    .delete(synchronize_session=False)
-                )
-                db.delete(group)
-
-    db.commit()
     return {
         "groups_count": len(namespaces),
-        "services_count": services_count,
+        "services_count": 0,
         "namespaces": sorted(namespaces),
     }
 

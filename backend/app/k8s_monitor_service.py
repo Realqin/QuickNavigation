@@ -14,12 +14,75 @@ from app.models import K8sClusterConfig
 from app.schemas import K8sClusterConfigCreate, K8sClusterConfigUpdate, K8sScaleRequest
 
 
-K8S_TIMEOUT = httpx.Timeout(connect=8.0, read=30.0, write=10.0, pool=10.0)
+K8S_TIMEOUT = httpx.Timeout(connect=8.0, read=45.0, write=10.0, pool=10.0)
+K8S_HTTP_LIMITS = httpx.Limits(max_connections=32, max_keepalive_connections=16)
+K8S_CONNECT_RETRY_ATTEMPTS = 5
+K8S_CONNECT_RETRY_DELAYS = (0.4, 0.8, 1.2, 1.6)
 FLINK_REST_TIMEOUT = httpx.Timeout(connect=6.0, read=20.0, write=10.0, pool=10.0)
 FLINK_WATERMARK_DELAY_MS = 2 * 60 * 60 * 1000
 MAX_WATERMARK_TIMESTAMP_MS = 253402300799999
 KUBESPHERE_TOKEN_TTL_SECONDS = 10 * 60
 _KUBESPHERE_AUTH_CACHE: dict[int, tuple[dict[str, str], float]] = {}
+
+
+class K8sClusterHttpSession:
+    """复用与 K8s/KubeSphere 的 HTTP 连接，避免批量请求时短连接过多被拒绝。"""
+
+    def __init__(self, cluster: K8sClusterConfig):
+        self.cluster = cluster
+        self._client: httpx.Client | None = None
+
+    def __enter__(self) -> "K8sClusterHttpSession":
+        self._client = httpx.Client(
+            timeout=K8S_TIMEOUT,
+            verify=bool(self.cluster.verify_ssl),
+            limits=K8S_HTTP_LIMITS,
+        )
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    @property
+    def client(self) -> httpx.Client:
+        if self._client is None:
+            raise RuntimeError("K8sClusterHttpSession is not active")
+        return self._client
+
+
+class FlinkHttpClientPool:
+    """复用与 Flink REST 的 HTTP 连接，按 NodePort base_url 缓存。"""
+
+    def __init__(self, cluster: K8sClusterConfig):
+        self._cluster = cluster
+        self._clients: dict[str, httpx.Client] = {}
+
+    def client_for_port(self, port: int) -> httpx.Client:
+        base_url = _node_port_base_url(self._cluster, port)
+        existing = self._clients.get(base_url)
+        if existing is not None:
+            return existing
+        client = httpx.Client(
+            timeout=FLINK_REST_TIMEOUT,
+            verify=bool(self._cluster.verify_ssl),
+            follow_redirects=True,
+            limits=K8S_HTTP_LIMITS,
+        )
+        self._clients[base_url] = client
+        return client
+
+    def close(self) -> None:
+        for client in self._clients.values():
+            client.close()
+        self._clients.clear()
+
+    def __enter__(self) -> "FlinkHttpClientPool":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -78,6 +141,16 @@ def _response_preview(response: httpx.Response, limit: int = 160) -> str:
         .strip()
         .replace("\n", " ")[:limit]
     )
+
+
+def _is_no_buffer_space_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        text = f"{type(current).__name__}: {current}".lower()
+        if "no buffer space" in text or "enobufs" in text or "10055" in text:
+            return True
+        current = current.__cause__  # type: ignore[assignment]
+    return False
 
 
 def _base64_encode(value: str) -> str:
@@ -234,6 +307,7 @@ def _request(
     extra_headers: dict[str, str] | None = None,
     force_kubesphere_login: bool = False,
     retry_kubesphere_login: bool = True,
+    http_client: httpx.Client | None = None,
 ) -> httpx.Response:
     headers = {"Accept": "application/json"}
     if extra_headers:
@@ -256,22 +330,54 @@ def _request(
         auth = httpx.BasicAuth(username, password)
 
     url = f"{cluster.api_server.rstrip('/')}{path}"
-    try:
-        with httpx.Client(timeout=K8S_TIMEOUT, verify=bool(cluster.verify_ssl)) as client:
-            response = client.request(
-                method,
-                url,
-                params=params,
-                json=json_body,
-                headers=headers,
-                auth=auth,
-            )
-    except httpx.ConnectError as exc:
-        raise HTTPException(status_code=502, detail=f"无法连接集群：{exc}") from exc
-    except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=504, detail="连接 Kubernetes 集群超时") from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Kubernetes 请求失败：{exc}") from exc
+
+    def _send_request(client: httpx.Client) -> httpx.Response:
+        return client.request(
+            method,
+            url,
+            params=params,
+            json=json_body,
+            headers=headers,
+            auth=auth,
+        )
+
+    response: httpx.Response | None = None
+    last_connect_error: httpx.ConnectError | None = None
+    for attempt in range(K8S_CONNECT_RETRY_ATTEMPTS):
+        try:
+            if http_client is not None:
+                response = _send_request(http_client)
+            else:
+                with httpx.Client(
+                    timeout=K8S_TIMEOUT,
+                    verify=bool(cluster.verify_ssl),
+                    limits=K8S_HTTP_LIMITS,
+                ) as client:
+                    response = _send_request(client)
+            last_connect_error = None
+            break
+        except httpx.ConnectError as exc:
+            last_connect_error = exc
+            if _is_no_buffer_space_error(exc):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"系统网络缓冲区不足，已停止重试 Kubernetes 连接：{exc}",
+                ) from exc
+            if attempt < K8S_CONNECT_RETRY_ATTEMPTS - 1:
+                time.sleep(K8S_CONNECT_RETRY_DELAYS[attempt])
+                continue
+        except httpx.TimeoutException as exc:
+            raise HTTPException(status_code=504, detail="连接 Kubernetes 集群超时") from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Kubernetes 请求失败：{exc}") from exc
+
+    if last_connect_error is not None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"无法连接集群：{last_connect_error}",
+        ) from last_connect_error
+    if response is None:
+        raise HTTPException(status_code=502, detail="无法连接集群")
 
     if 200 <= response.status_code < 300:
         return response
@@ -298,6 +404,7 @@ def _request(
             extra_headers=extra_headers,
             force_kubesphere_login=True,
             retry_kubesphere_login=False,
+            http_client=http_client,
         )
     if response.status_code in {401, 403}:
         detail = detail or "认证失败或权限不足"
@@ -465,6 +572,7 @@ def _get_json(
     params: dict[str, Any] | None = None,
     *,
     force_kubesphere_login: bool = False,
+    http_client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     response = _request(
         cluster,
@@ -472,6 +580,7 @@ def _get_json(
         path,
         params=params,
         force_kubesphere_login=force_kubesphere_login,
+        http_client=http_client,
     )
     try:
         payload = response.json()
@@ -491,36 +600,7 @@ def _get_json(
     return payload
 
 
-def test_k8s_cluster_connection(db: Session, cluster: K8sClusterConfig) -> dict[str, Any]:
-    started = time.perf_counter()
-    namespace_payload = _get_json(
-        cluster,
-        "/api/v1/namespaces",
-        force_kubesphere_login=_uses_kubesphere_password_auth(cluster),
-    )
-    version_payload: dict[str, Any] = {}
-    try:
-        version_path = "/kapis/version" if (cluster.provider or "native") == "kubesphere" else "/version"
-        version_payload = _get_json(cluster, version_path)
-    except HTTPException:
-        if (cluster.provider or "native") != "kubesphere":
-            raise
-    latency_ms = round((time.perf_counter() - started) * 1000, 2)
-    cluster.last_connected_at = datetime.utcnow()
-    db.commit()
-    git_version = str(version_payload.get("gitVersion") or "")
-    return {
-        "ok": True,
-        "message": "连接成功",
-        "cluster_id": cluster.id,
-        "version": git_version,
-        "namespace_count": len(_items(namespace_payload)),
-        "latency_ms": latency_ms,
-    }
-
-
-def list_k8s_projects(cluster: K8sClusterConfig) -> list[dict[str, Any]]:
-    payload = _get_json(cluster, "/api/v1/namespaces")
+def _projects_from_namespace_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     projects: list[dict[str, Any]] = []
     for item in _items(payload):
         metadata = item.get("metadata") or {}
@@ -536,6 +616,51 @@ def list_k8s_projects(cluster: K8sClusterConfig) -> list[dict[str, Any]]:
             }
         )
     return sorted(projects, key=lambda item: item["name"])
+
+
+def test_k8s_cluster_connection(db: Session, cluster: K8sClusterConfig) -> dict[str, Any]:
+    started = time.perf_counter()
+    with K8sClusterHttpSession(cluster) as session:
+        namespace_payload = _get_json(
+            cluster,
+            "/api/v1/namespaces",
+            force_kubesphere_login=_uses_kubesphere_password_auth(cluster),
+            http_client=session.client,
+        )
+        version_payload: dict[str, Any] = {}
+        try:
+            version_path = (
+                "/kapis/version" if (cluster.provider or "native") == "kubesphere" else "/version"
+            )
+            version_payload = _get_json(cluster, version_path, http_client=session.client)
+        except HTTPException:
+            if (cluster.provider or "native") != "kubesphere":
+                raise
+    projects = _projects_from_namespace_payload(namespace_payload)
+    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    connected_at = datetime.utcnow()
+    cluster.last_connected_at = connected_at
+    db.commit()
+    git_version = str(version_payload.get("gitVersion") or "")
+    return {
+        "ok": True,
+        "message": "连接成功",
+        "cluster_id": cluster.id,
+        "version": git_version,
+        "namespace_count": len(projects),
+        "projects": projects,
+        "latency_ms": latency_ms,
+        "last_connected_at": connected_at,
+    }
+
+
+def list_k8s_projects(
+    cluster: K8sClusterConfig,
+    *,
+    http_client: httpx.Client | None = None,
+) -> list[dict[str, Any]]:
+    payload = _get_json(cluster, "/api/v1/namespaces", http_client=http_client)
+    return _projects_from_namespace_payload(payload)
 
 
 def _selector_matches(selector: dict[str, Any], labels: dict[str, Any]) -> bool:
@@ -709,19 +834,48 @@ def _service_row(
     }
 
 
-def _load_namespace_payloads(cluster: K8sClusterConfig, namespace: str) -> dict[str, list[dict[str, Any]]]:
+def _load_namespace_payloads(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    *,
+    http_client: httpx.Client | None = None,
+    include_pods: bool = True,
+) -> dict[str, list[dict[str, Any]]]:
     ns = _q(namespace)
-    return {
-        "services": _items(_get_json(cluster, f"/api/v1/namespaces/{ns}/services")),
-        "pods": _items(_get_json(cluster, f"/api/v1/namespaces/{ns}/pods")),
-        "deployments": _items(_get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/deployments")),
-        "statefulsets": _items(_get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/statefulsets")),
-        "daemonsets": _items(_get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/daemonsets")),
+    payloads: dict[str, list[dict[str, Any]]] = {
+        "services": _items(_get_json(cluster, f"/api/v1/namespaces/{ns}/services", http_client=http_client)),
+        "deployments": _items(
+            _get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/deployments", http_client=http_client)
+        ),
+        "statefulsets": _items(
+            _get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/statefulsets", http_client=http_client)
+        ),
+        "daemonsets": _items(
+            _get_json(cluster, f"/apis/apps/v1/namespaces/{ns}/daemonsets", http_client=http_client)
+        ),
     }
+    if include_pods:
+        payloads["pods"] = _items(
+            _get_json(cluster, f"/api/v1/namespaces/{ns}/pods", http_client=http_client)
+        )
+    else:
+        payloads["pods"] = []
+    return payloads
 
 
-def list_k8s_services(cluster: K8sClusterConfig, namespace: str) -> list[dict[str, Any]]:
-    payloads = _load_namespace_payloads(cluster, namespace)
+def _list_k8s_services_impl(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    *,
+    http_client: httpx.Client,
+    include_pods: bool = True,
+) -> list[dict[str, Any]]:
+    payloads = _load_namespace_payloads(
+        cluster,
+        namespace,
+        http_client=http_client,
+        include_pods=include_pods,
+    )
     services = payloads["services"]
     pods = payloads["pods"]
     rows: list[dict[str, Any]] = []
@@ -782,6 +936,240 @@ def list_k8s_services(cluster: K8sClusterConfig, namespace: str) -> list[dict[st
     return sorted(rows, key=lambda item: item["service_name"])
 
 
+def _try_get_json(
+    cluster: K8sClusterConfig,
+    path: str,
+    params: dict[str, Any] | None = None,
+    *,
+    http_client: httpx.Client | None = None,
+) -> dict[str, Any] | None:
+    try:
+        return _get_json(cluster, path, params=params, http_client=http_client)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+
+
+def _workload_kind_name(resource: dict[str, Any]) -> tuple[str | None, str | None]:
+    kind = str(resource.get("kind") or "")
+    if kind not in {"Deployment", "StatefulSet", "DaemonSet"}:
+        return None, None
+    name = str(((resource.get("metadata") or {}).get("name") or "")) or None
+    return kind, name
+
+
+def _resolve_workload_link_meta(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    service_name: str,
+    resource: dict[str, Any] | None,
+    *,
+    http_client: httpx.Client,
+) -> tuple[str | None, str | None]:
+    """解析 KubeSphere 控制台链接所需的工作负载类型与名称。"""
+    if resource:
+        kind, name = _workload_kind_name(resource)
+        if kind and name:
+            return kind, name
+
+    ns = _q(namespace)
+    sn = _q(service_name)
+
+    for resource_path, kind in (
+        ("deployments", "Deployment"),
+        ("statefulsets", "StatefulSet"),
+        ("daemonsets", "DaemonSet"),
+    ):
+        item = _try_get_json(
+            cluster,
+            f"/apis/apps/v1/namespaces/{ns}/{resource_path}/{sn}",
+            http_client=http_client,
+        )
+        if item:
+            return kind, str(((item.get("metadata") or {}).get("name") or "")) or None
+
+    service_obj = resource if resource and str(resource.get("kind") or "") == "Service" else None
+    if not service_obj:
+        service_obj = _try_get_json(
+            cluster,
+            f"/api/v1/namespaces/{ns}/services/{sn}",
+            http_client=http_client,
+        )
+    service_selector = ((service_obj or {}).get("spec") or {}).get("selector") or {}
+    if not service_selector:
+        return None, None
+
+    for resource_path, kind in (
+        ("deployments", "Deployment"),
+        ("statefulsets", "StatefulSet"),
+        ("daemonsets", "DaemonSet"),
+    ):
+        payload = _try_get_json(
+            cluster,
+            f"/apis/apps/v1/namespaces/{ns}/{resource_path}",
+            http_client=http_client,
+        )
+        if not payload:
+            continue
+        for workload in _items(payload):
+            workload_selector = ((workload.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+            if _selector_matches(service_selector, workload_selector):
+                name = str(((workload.get("metadata") or {}).get("name") or "")) or None
+                if name:
+                    return kind, name
+
+    return None, None
+
+
+def _resolve_service_selector_and_resource(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    service_name: str,
+    *,
+    http_client: httpx.Client,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    ns = _q(namespace)
+    sn = _q(service_name)
+    service = _try_get_json(
+        cluster,
+        f"/api/v1/namespaces/{ns}/services/{sn}",
+        http_client=http_client,
+    )
+    if service:
+        selector = (service.get("spec") or {}).get("selector") or {}
+        return selector, service
+
+    workload: dict[str, Any] | None = None
+    selector: dict[str, Any] = {}
+    for resource in ("deployments", "statefulsets", "daemonsets"):
+        item = _try_get_json(
+            cluster,
+            f"/apis/apps/v1/namespaces/{ns}/{resource}/{sn}",
+            http_client=http_client,
+        )
+        if not item:
+            continue
+        workload = item
+        selector = ((item.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+        break
+
+    if not selector:
+        return {}, service or workload
+
+    services_payload = _get_json(
+        cluster,
+        f"/api/v1/namespaces/{ns}/services",
+        http_client=http_client,
+    )
+    matched_service = _service_for_workload(selector, _items(services_payload))
+    return selector, matched_service or workload
+
+
+def _pod_restart_total(pods: list[dict[str, Any]]) -> int:
+    return sum(_pod_container_restart_map(pods).values())
+
+
+def _active_alarm_pods(pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """仅统计仍在运行或启动中的 Pod，排除 Terminating/Succeeded/Failed 等。"""
+    active: list[dict[str, Any]] = []
+    for pod in pods:
+        phase = str((pod.get("status") or {}).get("phase") or "")
+        if phase in {"Running", "Pending"}:
+            active.append(pod)
+    return active
+
+
+def _pod_container_restart_map(pods: list[dict[str, Any]]) -> dict[str, int]:
+    """按 pod/container 维度收集 restartCount，key 形如 my-pod-abc/app。"""
+    counts: dict[str, int] = {}
+    for pod in _active_alarm_pods(pods):
+        pod_name = str((pod.get("metadata") or {}).get("name") or "")
+        if not pod_name:
+            continue
+        status = pod.get("status") or {}
+        for container_status in status.get("containerStatuses") or []:
+            container_name = str(container_status.get("name") or "")
+            if not container_name:
+                continue
+            key = f"{pod_name}/{container_name}"
+            counts[key] = int(container_status.get("restartCount") or 0)
+    return counts
+
+
+def probe_k8s_service_for_alarm(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    service_name: str,
+    *,
+    http_client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    """单服务轻量探测，供后台巡检顺序检查使用。"""
+
+    def _probe(client: httpx.Client) -> dict[str, Any]:
+        selector, resource = _resolve_service_selector_and_resource(
+            cluster,
+            namespace,
+            service_name,
+            http_client=client,
+        )
+        pods: list[dict[str, Any]] = []
+        if selector:
+            label_selector = ",".join(f"{key}={value}" for key, value in selector.items())
+            pods_payload = _get_json(
+                cluster,
+                f"/api/v1/namespaces/{_q(namespace)}/pods",
+                params={"labelSelector": label_selector},
+                http_client=client,
+            )
+            pods = _items(pods_payload)
+        service_obj = resource if resource and str(resource.get("kind") or "") == "Service" else None
+        external_ports = _service_external_ports(service_obj or {})
+        workload_kind, workload_name = _resolve_workload_link_meta(
+            cluster,
+            namespace,
+            service_name,
+            resource,
+            http_client=client,
+        )
+        return {
+            "restart_count": _pod_restart_total(pods),
+            "restart_map": _pod_container_restart_map(pods),
+            "external_ports": external_ports,
+            "workload_kind": workload_kind,
+            "workload_name": workload_name,
+            "pods": pods,
+        }
+
+    if http_client is not None:
+        return _probe(http_client)
+    with K8sClusterHttpSession(cluster) as session:
+        return _probe(session.client)
+
+
+def list_k8s_services(
+    cluster: K8sClusterConfig,
+    namespace: str,
+    *,
+    http_client: httpx.Client | None = None,
+    include_pods: bool = True,
+) -> list[dict[str, Any]]:
+    if http_client is not None:
+        return _list_k8s_services_impl(
+            cluster,
+            namespace,
+            http_client=http_client,
+            include_pods=include_pods,
+        )
+    with K8sClusterHttpSession(cluster) as session:
+        return _list_k8s_services_impl(
+            cluster,
+            namespace,
+            http_client=session.client,
+            include_pods=include_pods,
+        )
+
+
 def scale_k8s_workload(cluster: K8sClusterConfig, data: K8sScaleRequest) -> dict[str, Any]:
     kind = data.workload_kind.lower()
     resource = {"deployment": "deployments", "statefulset": "statefulsets"}.get(kind)
@@ -827,16 +1215,30 @@ def _node_port_base_url(cluster: K8sClusterConfig, port: int) -> str:
     return f"{scheme}://{host}:{port_value}"
 
 
-def _get_flink_json(cluster: K8sClusterConfig, base_url: str, path: str) -> Any:
+def _get_flink_json(
+    cluster: K8sClusterConfig,
+    base_url: str,
+    path: str,
+    *,
+    http_client: httpx.Client | None = None,
+) -> Any:
     url = f"{base_url.rstrip('/')}{path}"
     try:
-        with httpx.Client(
-            timeout=FLINK_REST_TIMEOUT,
-            verify=bool(cluster.verify_ssl),
-            follow_redirects=True,
-        ) as client:
-            response = client.get(url, headers={"Accept": "application/json"})
+        if http_client is not None:
+            response = http_client.get(url, headers={"Accept": "application/json"})
+        else:
+            with httpx.Client(
+                timeout=FLINK_REST_TIMEOUT,
+                verify=bool(cluster.verify_ssl),
+                follow_redirects=True,
+            ) as client:
+                response = client.get(url, headers={"Accept": "application/json"})
     except httpx.ConnectError as exc:
+        if _is_no_buffer_space_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail=f"系统网络缓冲区不足，已停止 Flink 请求：{exc}",
+            ) from exc
         raise HTTPException(status_code=502, detail=f"无法连接 Flink REST 服务：{base_url}") from exc
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="访问 Flink REST 服务超时") from exc
@@ -971,15 +1373,16 @@ def _watermark_value_out(raw: Any, timestamp: int, now_ms: int) -> dict[str, Any
     }
 
 
-def read_k8s_service_watermarks(
+def _read_k8s_service_watermarks_with_client(
     cluster: K8sClusterConfig,
     *,
     namespace: str,
     service_name: str,
     port: int,
+    base_url: str,
+    http_client: httpx.Client,
 ) -> dict[str, Any]:
-    base_url = _node_port_base_url(cluster, port)
-    overview = _get_flink_json(cluster, base_url, "/jobs/overview")
+    overview = _get_flink_json(cluster, base_url, "/jobs/overview", http_client=http_client)
     if not isinstance(overview, dict):
         raise HTTPException(status_code=502, detail="Flink REST 返回格式异常：/jobs/overview")
     jobs = _extract_flink_jobs(overview)
@@ -989,7 +1392,12 @@ def read_k8s_service_watermarks(
     for job in jobs:
         job_id = job["jid"]
         job_name = job.get("name") or ""
-        detail = _get_flink_json(cluster, base_url, f"/jobs/{_q(job_id)}")
+        detail = _get_flink_json(
+            cluster,
+            base_url,
+            f"/jobs/{_q(job_id)}",
+            http_client=http_client,
+        )
         if not isinstance(detail, dict):
             raise HTTPException(status_code=502, detail=f"Flink REST 返回格式异常：/jobs/{job_id}")
         for vertex in _extract_flink_vertices(detail):
@@ -1006,6 +1414,7 @@ def read_k8s_service_watermarks(
                     cluster,
                     base_url,
                     f"/jobs/{_q(job_id)}/vertices/{_q(vertex['id'])}/watermarks",
+                    http_client=http_client,
                 )
                 for raw_value in _extract_watermark_candidates(watermark_payload):
                     timestamp = _coerce_watermark_timestamp(raw_value)
@@ -1026,6 +1435,191 @@ def read_k8s_service_watermarks(
         "jobs_count": len(jobs),
         "items": rows,
     }
+
+
+def read_k8s_service_watermarks(
+    cluster: K8sClusterConfig,
+    *,
+    namespace: str,
+    service_name: str,
+    port: int,
+    http_client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    base_url = _node_port_base_url(cluster, port)
+    if http_client is not None:
+        return _read_k8s_service_watermarks_with_client(
+            cluster,
+            namespace=namespace,
+            service_name=service_name,
+            port=port,
+            base_url=base_url,
+            http_client=http_client,
+        )
+    with httpx.Client(
+        timeout=FLINK_REST_TIMEOUT,
+        verify=bool(cluster.verify_ssl),
+        follow_redirects=True,
+        limits=K8S_HTTP_LIMITS,
+    ) as client:
+        return _read_k8s_service_watermarks_with_client(
+            cluster,
+            namespace=namespace,
+            service_name=service_name,
+            port=port,
+            base_url=base_url,
+            http_client=client,
+        )
+
+
+FLINK_EXCEPTION_MAX_ENTRIES = 10
+
+
+def _truncate_exception_stacktrace(text: Any, limit: int = 2000) -> str:
+    if text is None:
+        return ""
+    raw = str(text)
+    if len(raw) <= limit:
+        return raw
+    return raw[:limit] + f"\n... (已截断，共 {len(raw)} 字符)"
+
+
+def _parse_flink_exceptions_payload(payload: Any) -> tuple[str, int, list[dict[str, Any]]]:
+    """从 Flink /jobs/{jid}/exceptions 响应中解析异常信息。
+
+    兼容新版 exceptionHistory.entries 与旧版 root-exception/timestamp/all-exceptions。
+    返回 (root_exception, latest_timestamp_ms, exceptions_list)。
+    """
+    if not isinstance(payload, dict):
+        return "", 0, []
+
+    entries: list[dict[str, Any]] = []
+
+    history = payload.get("exceptionHistory")
+    if isinstance(history, dict):
+        raw_entries = history.get("entries")
+        if isinstance(raw_entries, list):
+            for item in raw_entries:
+                if not isinstance(item, dict):
+                    continue
+                timestamp = _coerce_watermark_timestamp(item.get("timestamp")) or 0
+                entries.append(
+                    {
+                        "exception_name": str(item.get("exceptionName") or "").strip(),
+                        "stacktrace": _truncate_exception_stacktrace(item.get("stacktrace")),
+                        "timestamp": timestamp,
+                        "task_name": str(item.get("taskName") or "").strip(),
+                        "location": str(item.get("location") or "").strip(),
+                    }
+                )
+
+    if not entries:
+        legacy = payload.get("all-exceptions")
+        if isinstance(legacy, list):
+            for item in legacy:
+                if not isinstance(item, dict):
+                    continue
+                timestamp = _coerce_watermark_timestamp(item.get("timestamp")) or 0
+                entries.append(
+                    {
+                        "exception_name": str(item.get("exception") or "").strip(),
+                        "stacktrace": _truncate_exception_stacktrace(item.get("exception")),
+                        "timestamp": timestamp,
+                        "task_name": str(item.get("task") or "").strip(),
+                        "location": str(item.get("location") or "").strip(),
+                    }
+                )
+
+    root_exception = ""
+    root_timestamp = 0
+    if entries:
+        latest = max(entries, key=lambda item: item.get("timestamp") or 0)
+        root_exception = latest.get("exception_name") or latest.get("stacktrace") or ""
+        root_timestamp = latest.get("timestamp") or 0
+    else:
+        root_exception = str(payload.get("root-exception") or "").strip()
+        root_exception = _truncate_exception_stacktrace(root_exception)
+        root_timestamp = _coerce_watermark_timestamp(payload.get("timestamp")) or 0
+
+    return root_exception, root_timestamp, entries
+
+
+def _read_k8s_service_exceptions_with_client(
+    cluster: K8sClusterConfig,
+    *,
+    namespace: str,
+    service_name: str,
+    port: int,
+    base_url: str,
+    http_client: httpx.Client,
+) -> dict[str, Any]:
+    overview = _get_flink_json(cluster, base_url, "/jobs/overview", http_client=http_client)
+    if not isinstance(overview, dict):
+        raise HTTPException(status_code=502, detail="Flink REST 返回格式异常：/jobs/overview")
+    jobs = _extract_flink_jobs(overview)
+
+    job_exceptions: list[dict[str, Any]] = []
+    for job in jobs:
+        job_id = job["jid"]
+        job_name = job.get("name") or ""
+        payload = _get_flink_json(
+            cluster,
+            base_url,
+            f"/jobs/{_q(job_id)}/exceptions?maxExceptions={FLINK_EXCEPTION_MAX_ENTRIES}",
+            http_client=http_client,
+        )
+        root_exception, latest_timestamp, entries = _parse_flink_exceptions_payload(payload)
+        job_exceptions.append(
+            {
+                "job_id": job_id,
+                "job_name": job_name,
+                "root_exception": root_exception,
+                "latest_timestamp": latest_timestamp,
+                "exception_count": len(entries),
+                "exceptions": entries,
+            }
+        )
+
+    return {
+        "cluster_id": cluster.id,
+        "namespace": namespace,
+        "service_name": service_name,
+        "port": int(port),
+        "items": job_exceptions,
+    }
+
+
+def read_k8s_service_exceptions(
+    cluster: K8sClusterConfig,
+    *,
+    namespace: str,
+    service_name: str,
+    port: int,
+    http_client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    base_url = _node_port_base_url(cluster, port)
+    if http_client is not None:
+        return _read_k8s_service_exceptions_with_client(
+            cluster,
+            namespace=namespace,
+            service_name=service_name,
+            port=port,
+            base_url=base_url,
+            http_client=http_client,
+        )
+    with httpx.Client(
+        timeout=FLINK_REST_TIMEOUT,
+        verify=bool(cluster.verify_ssl),
+        follow_redirects=True,
+        limits=K8S_HTTP_LIMITS,
+    ) as client:
+        return _read_k8s_service_exceptions_with_client(
+            cluster,
+            namespace=namespace,
+            service_name=service_name,
+            port=port,
+            base_url=base_url,
+            http_client=client,
+        )
 
 
 def read_k8s_pod_logs(

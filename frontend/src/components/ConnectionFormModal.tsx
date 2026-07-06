@@ -83,6 +83,35 @@ function TypeFields({
     );
   }
 
+  if (kind === 'k8s') {
+    return (
+      <>
+        <Form.Item
+          name="url"
+          label="访问地址"
+          rules={[{ required: true, message: '请输入 K8s 访问地址' }]}
+          extra="填写控制台完整地址，保存后可点击跳转；系统自动解析 IP/端口用于连接"
+        >
+          <Input placeholder="http://10.100.0.11:30880" />
+        </Form.Item>
+        <Form.Item name="username" label="账号">
+          <Input placeholder="可选" />
+        </Form.Item>
+        <Form.Item name="password" label="密码 / Token">
+          <Input.Password
+            placeholder={passwordSet ? '已设置，留空不修改' : '可选，可填 Bearer Token'}
+            autoComplete="new-password"
+          />
+        </Form.Item>
+        <div className="connection-form-modal__test-btn">
+          <Button icon={<ApiOutlined />} loading={testing} onClick={onTest}>
+            测试连接
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   if (kind === 'mqtt') {
     return (
       <>
@@ -381,7 +410,7 @@ export default function ConnectionFormModal({
               ? formatKafkaBrokersForInput(connection.host, connection.port)
               : (connection.host ?? undefined),
           port:
-            editKind === 'kafka' || editKind === 'gitlab'
+            editKind === 'kafka' || editKind === 'gitlab' || editKind === 'k8s'
               ? undefined
               : (connection.port ?? DEFAULT_PORTS[editKind]),
           username: connection.username ?? undefined,
@@ -433,7 +462,7 @@ export default function ConnectionFormModal({
   ]);
 
   useEffect(() => {
-    if (!open || connection || connectionKind === 'kafka' || connectionKind === 'gitlab' || connectionKind === 'other') {
+    if (!open || connection || connectionKind === 'kafka' || connectionKind === 'gitlab' || connectionKind === 'other' || connectionKind === 'k8s') {
       return;
     }
     const defaultPort = DEFAULT_PORTS[connectionKind];
@@ -452,7 +481,9 @@ export default function ConnectionFormModal({
             ? (['type', 'host', 'port', 'username', 'password'] as const)
             : connectionKind === 'kafka'
               ? (['type', 'host', 'username', 'password'] as const)
-              : (['type', 'host', 'port', 'password'] as const);
+              : connectionKind === 'k8s'
+                ? (['type', 'url', 'username', 'password'] as const)
+                : (['type', 'host', 'port', 'password'] as const);
     const values = await form.validateFields([...fields]);
     const password = values.password?.trim();
     if (!password && !connection?.password_set && connectionKind === 'terminal') {
@@ -466,11 +497,14 @@ export default function ConnectionFormModal({
         host:
           connectionKind === 'kafka'
             ? normalizeKafkaBrokersInput(values.host?.trim() ?? '')
-            : (values.host?.trim() ?? ''),
-        port: connectionKind === 'kafka' ? undefined : Number(values.port),
+            : connectionKind === 'k8s'
+              ? (values.url?.trim() ?? '')
+              : (values.host?.trim() ?? ''),
+        port: connectionKind === 'kafka' || connectionKind === 'k8s' ? undefined : Number(values.port),
         username: values.username?.trim() || undefined,
         password: password || undefined,
         database_name: values.database_name?.trim() || undefined,
+        connection_id: connection?.id,
       });
       if (result.ok) {
         message.success(
@@ -518,6 +552,14 @@ export default function ConnectionFormModal({
       if (!payload.password?.trim()) {
         delete payload.password;
       }
+    } else if (connectionKind === 'k8s') {
+      payload.url = values.url?.trim() || '';
+      payload.host = undefined;
+      payload.port = undefined;
+      payload.sub_links = [];
+      if (!payload.password?.trim()) {
+        delete payload.password;
+      }
     } else {
       payload.url = '';
       payload.sub_links = [];
@@ -550,6 +592,10 @@ export default function ConnectionFormModal({
               ? connection
                 ? '编辑 Kafka 连接'
                 : '新增 Kafka 连接'
+              : connectionKind === 'k8s'
+                ? connection
+                  ? '编辑 K8s 连接'
+                  : '新增 K8s 连接'
               : connectionKind === 'gitlab'
                 ? connection
                   ? '编辑 GitLab 连接'

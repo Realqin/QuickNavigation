@@ -129,7 +129,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (resolvedProject == null || resolvedEnvironment == null) return;
-    const ws = createLogsWebSocket((log) => {
+    const handle = createLogsWebSocket((log) => {
       if (
         log.project === String(resolvedProject) &&
         log.environment === String(resolvedEnvironment)
@@ -137,7 +137,7 @@ export default function HomePage() {
         setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, HOME_LOG_LIMIT));
       }
     });
-    return () => ws.close();
+    return () => handle.close();
   }, [resolvedProject, resolvedEnvironment]);
 
   const handleExpandChange = (key: string, expanded: boolean) => {

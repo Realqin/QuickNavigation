@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import ApiMonitorActivityChangeModal from '../components/ApiMonitorActivityChangeModal';
 import CommitDiffModal from '../components/CommitDiffModal';
+import K8sAlarmActivityDetailModal from '../components/K8sAlarmActivityDetailModal';
 import SchemaChangeModal from '../components/SchemaChangeModal';
 import type { ActivityLog } from '../types';
 import { extractCommitSha, resolveActivityLogDetail } from '../utils/activityLogDetail';
@@ -10,6 +11,8 @@ export function useActivityLogDetail() {
   const [schemaChangeOpen, setSchemaChangeOpen] = useState(false);
   const [apiMonitorChangeLog, setApiMonitorChangeLog] = useState<ActivityLog | null>(null);
   const [apiMonitorChangeOpen, setApiMonitorChangeOpen] = useState(false);
+  const [k8sAlarmLog, setK8sAlarmLog] = useState<ActivityLog | null>(null);
+  const [k8sAlarmOpen, setK8sAlarmOpen] = useState(false);
   const [diffLogId, setDiffLogId] = useState<number | null>(null);
   const [diffCommitSha, setDiffCommitSha] = useState<string | null>(null);
   const [diffSummary, setDiffSummary] = useState<string | null>(null);
@@ -25,6 +28,11 @@ export function useActivityLogDetail() {
     if (detailType === 'api-monitor') {
       setApiMonitorChangeLog(log);
       setApiMonitorChangeOpen(true);
+      return;
+    }
+    if (detailType === 'k8s-alarm') {
+      setK8sAlarmLog(log);
+      setK8sAlarmOpen(true);
       return;
     }
     if (detailType === 'diff') {
@@ -53,6 +61,14 @@ export function useActivityLogDetail() {
         onClose={() => {
           setApiMonitorChangeOpen(false);
           setApiMonitorChangeLog(null);
+        }}
+      />
+      <K8sAlarmActivityDetailModal
+        log={k8sAlarmLog}
+        open={k8sAlarmOpen}
+        onClose={() => {
+          setK8sAlarmOpen(false);
+          setK8sAlarmLog(null);
         }}
       />
       <CommitDiffModal

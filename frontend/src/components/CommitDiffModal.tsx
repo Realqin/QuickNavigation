@@ -15,9 +15,12 @@ interface Props {
   onClose: () => void;
 }
 
-function emptyDiffHint(provider?: string | null): string {
+function emptyDiffHint(provider?: string | null, message?: string | null): string {
+  if (message?.trim()) {
+    return message.trim();
+  }
   if (provider === 'gitlab') {
-    return '暂无 diff 内容。请在「仓库访问配置」中填写 GitLab Token 与 Base URL，或于 backend/.env 配置后重启后端。';
+    return '暂无 diff 内容。请在「仓库访问配置」中填写 GitLab Token、SSH Deploy Key 或 Base URL，保存后重试。';
   }
   return '暂无 diff 内容。请在「仓库访问配置」中填写 GitHub Token，或于 backend/.env 配置后重启后端。';
 }
@@ -130,7 +133,7 @@ export default function CommitDiffModal({
             </div>
           ) : (
             <div className="commit-diff-empty">
-              {emptyDiffHint(diffData?.provider)}
+              {emptyDiffHint(diffData?.provider, diffData?.message)}
             </div>
           )}
 

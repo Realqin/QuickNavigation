@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import Base, engine, SessionLocal
 from app.models import Connection, DictItem, EmbedConsoleSession
 from app.mqtt_bridge_service import run_mqtt_bridge, run_mqtt_bridge_session
+from app.k8s_alarm_scheduler import k8s_alarm_scheduler
 from app.ping_scheduler import connection_ping_scheduler
 from app.schema_monitor_scheduler import schema_monitor_scheduler
 from app.routers import api, webhooks
@@ -23,6 +24,7 @@ from app.services import (
     LABEL_DATABASE,
     LABEL_OTHER,
     LABEL_KAFKA,
+    LABEL_K8S,
     LABEL_MQTT,
     LABEL_REDIS,
     LABEL_TERMINAL,
@@ -41,8 +43,9 @@ async def lifespan(app: FastAPI):
     init_db()
     ping_task = asyncio.create_task(connection_ping_scheduler())
     schema_task = asyncio.create_task(schema_monitor_scheduler())
+    k8s_alarm_task = asyncio.create_task(k8s_alarm_scheduler())
     yield
-    for task in (ping_task, schema_task):
+    for task in (ping_task, schema_task, k8s_alarm_task):
         task.cancel()
         try:
             await task
@@ -106,6 +109,7 @@ def seed_dict_items(db) -> None:
         (DICT_LABEL, LABEL_REDIS, "Redis 缓存连接", 5, True),
         (DICT_LABEL, LABEL_MQTT, "MQTT 消息连接", 6, True),
         (DICT_LABEL, LABEL_KAFKA, "Kafka 消息队列连接", 7, True),
+        (DICT_LABEL, LABEL_K8S, "Kubernetes 集群连接", 8, True),
     ]
     db.add_all(
         [
@@ -511,6 +515,7 @@ def seed_system_labels(db) -> None:
         (LABEL_REDIS, "Redis 缓存连接", 5),
         (LABEL_MQTT, "MQTT 消息连接", 6),
         (LABEL_KAFKA, "Kafka 消息队列连接", 7),
+        (LABEL_K8S, "Kubernetes 集群连接", 8),
     ]
     for name, description, sort_order in system_labels:
         item = (
@@ -729,6 +734,72 @@ def migrate_api_test_case_request_headers() -> None:
         db.close()
 
 
+def migrate_k8s_alarm_pod_restart_snapshot() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("k8s_alarm_monitor_snapshots"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("k8s_alarm_monitor_snapshots")}
+    if "pod_restart_snapshot" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE k8s_alarm_monitor_snapshots ADD COLUMN pod_restart_snapshot JSON NULL")
+        )
+
+
+def migrate_k8s_alarm_exception_columns() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("k8s_alarm_monitor_snapshots"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("k8s_alarm_monitor_snapshots")}
+    with engine.begin() as conn:
+        if "last_exception_timestamp" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE k8s_alarm_monitor_snapshots ADD COLUMN last_exception_timestamp INT NULL"
+                )
+            )
+        if "exception_alert_active" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE k8s_alarm_monitor_snapshots ADD COLUMN exception_alert_active BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+
+
+def migrate_repo_access_ssh_key() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("repo_access_settings"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("repo_access_settings")}
+    if "gitlab_ssh_private_key" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE repo_access_settings ADD COLUMN gitlab_ssh_private_key TEXT NULL")
+        )
+        conn.execute(
+            text("UPDATE repo_access_settings SET gitlab_ssh_private_key = '' WHERE gitlab_ssh_private_key IS NULL")
+        )
+
+
+def migrate_k8s_cluster_connection_id() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("k8s_cluster_configs"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("k8s_cluster_configs")}
+    if "connection_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE k8s_cluster_configs ADD COLUMN connection_id INT NULL"))
+        conn.execute(
+            text(
+                "ALTER TABLE k8s_cluster_configs "
+                "ADD UNIQUE INDEX uq_k8s_cluster_connection_id (connection_id)"
+            )
+        )
+
+
 def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
@@ -753,6 +824,10 @@ def init_db() -> None:
     migrate_api_test_case_response_assert()
     migrate_api_test_case_execution_result()
     migrate_api_test_case_request_headers()
+    migrate_k8s_alarm_pod_restart_snapshot()
+    migrate_k8s_alarm_exception_columns()
+    migrate_k8s_cluster_connection_id()
+    migrate_repo_access_ssh_key()
     db = SessionLocal()
     try:
         seed_dict_items(db)
@@ -793,6 +868,8 @@ async def websocket_logs(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         ws_manager.disconnect(websocket)
 
 
