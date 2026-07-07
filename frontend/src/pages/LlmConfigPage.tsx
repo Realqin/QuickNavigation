@@ -25,6 +25,7 @@ import {
   updateLlmConfig,
 } from '../api';
 import type { LlmConfig, LlmConfigFormValues } from '../types/llm';
+import { getApiErrorMessage, showApiError } from '../utils/apiError';
 import { formatBeijingTime } from '../utils/dateTime';
 
 const DEFAULT_FORM: LlmConfigFormValues = {
@@ -54,8 +55,8 @@ export default function LlmConfigPage() {
     setLoading(true);
     try {
       setItems(await fetchLlmConfigs());
-    } catch {
-      message.error('加载 LLM 配置失败');
+    } catch (error) {
+      showApiError(error, '加载 LLM 配置失败');
     } finally {
       setLoading(false);
     }
@@ -104,8 +105,8 @@ export default function LlmConfigPage() {
       setModalOpen(false);
       setEditing(null);
       await loadItems();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 
@@ -114,8 +115,8 @@ export default function LlmConfigPage() {
       await deleteLlmConfig(item.id);
       message.success('删除成功');
       await loadItems();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   };
 
@@ -123,8 +124,8 @@ export default function LlmConfigPage() {
     try {
       await toggleLlmConfig(item.id, !item.enabled);
       await loadItems();
-    } catch {
-      message.error('切换状态失败');
+    } catch (error) {
+      showApiError(error, '切换状态失败');
     }
   };
 
@@ -157,12 +158,9 @@ export default function LlmConfigPage() {
         setTestMessage(timeoutText);
         message.error(timeoutText);
       } else {
-        const detail =
-          axiosError.response?.data?.detail ||
-          axiosError.message ||
-          '拉取模型列表失败';
-        setTestMessage(String(detail));
-        message.error(String(detail));
+        const detail = getApiErrorMessage(error, '拉取模型列表失败');
+        setTestMessage(detail);
+        message.error(detail);
       }
     } finally {
       setLoadingModels(false);
@@ -195,12 +193,9 @@ export default function LlmConfigPage() {
         setTestMessage(timeoutText);
         message.error(timeoutText);
       } else {
-        const detail =
-          axiosError.response?.data?.detail ||
-          axiosError.message ||
-          '测试连接失败';
-        setTestMessage(String(detail));
-        message.error(String(detail));
+        const detail = getApiErrorMessage(error, '测试连接失败');
+        setTestMessage(detail);
+        message.error(detail);
       }
     } finally {
       setTesting(false);

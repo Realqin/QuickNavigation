@@ -7,6 +7,7 @@ import {
   registerEmbedSessionCleanup,
   scheduleEmbedSessionClose,
 } from '../utils/embedSession';
+import { showApiError } from '../utils/apiError';
 
 export default function EmbedSessionPage() {
   const { message } = App.useApp();
@@ -30,9 +31,9 @@ export default function EmbedSessionPage() {
           setSrc(url);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          message.error('加载控制台会话失败');
+          showApiError(error, '加载控制台会话失败');
         }
       })
       .finally(() => {

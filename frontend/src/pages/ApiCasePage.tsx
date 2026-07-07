@@ -27,6 +27,7 @@ import ApiCaseFormModal from '../components/ApiCaseFormModal';
 import { useDictGroup } from '../hooks/useDict';
 import { formatCaseHeadersDisplay, formatCaseRequestParamsDisplay } from '../utils/caseRequestParts';
 import { renderCaseExecuteStatusCell } from '../utils/caseExecuteStatus';
+import { showApiError } from '../utils/apiError';
 import { formatExpectedResponseDisplay } from '../utils/responseAssert';
 import type { ApiTestCase, ApiTestCaseFormValues } from '../types/apiTestCase';
 import {
@@ -88,8 +89,8 @@ export default function ApiCasePage() {
       setSelectedRowKeys((prev) =>
         prev.filter((id) => result.items.some((item) => item.id === id)),
       );
-    } catch {
-      message.error('加载用例列表失败');
+    } catch (error) {
+      showApiError(error, '加载用例列表失败');
     } finally {
       setLoading(false);
     }
@@ -121,8 +122,8 @@ export default function ApiCasePage() {
       setModalOpen(false);
       setEditing(null);
       await loadData();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
       throw new Error('save failed');
     }
   };
@@ -132,8 +133,8 @@ export default function ApiCasePage() {
       await deleteApiTestCase(id);
       message.success('已移入已删除');
       await loadData();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   }, [loadData]);
 
@@ -142,8 +143,8 @@ export default function ApiCasePage() {
       await restoreApiTestCase(id);
       message.success('已恢复');
       await loadData();
-    } catch {
-      message.error('恢复失败');
+    } catch (error) {
+      showApiError(error, '恢复失败');
     }
   }, [loadData]);
 
@@ -153,8 +154,8 @@ export default function ApiCasePage() {
       message.success('已永久删除');
       setSelectedRowKeys((prev) => prev.filter((itemId) => itemId !== id));
       await loadData();
-    } catch {
-      message.error('永久删除失败');
+    } catch (error) {
+      showApiError(error, '永久删除失败');
     }
   }, [loadData]);
 
@@ -179,8 +180,8 @@ export default function ApiCasePage() {
       message.success(parts.length ? parts.join('，') : '操作完成');
       setSelectedRowKeys([]);
       await loadData();
-    } catch {
-      message.error('批量删除失败');
+    } catch (error) {
+      showApiError(error, '批量删除失败');
     } finally {
       setBatchDeleting(false);
     }

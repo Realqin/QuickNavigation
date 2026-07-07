@@ -282,6 +282,7 @@ class K8sClusterConfig(Base):
     api_server: Mapped[str] = mapped_column(String(512), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="native")
     auth_type: Mapped[str] = mapped_column(String(16), nullable=False, default="password")
+    cluster_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     password: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     verify_ssl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

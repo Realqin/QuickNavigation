@@ -21,6 +21,7 @@ import MqttConsoleConnectionModal from '../../components/MqttConsoleConnectionMo
 import MqttMethodSubscriptionPanel from '../../components/MqttMethodSubscriptionPanel';
 import MqttConsole from '../../features/mqtt-console/MqttConsole';
 import { registerPageCleanup } from '../../utils/pageCleanup';
+import { showApiError } from '../../utils/apiError';
 import type {
   MqttConsoleConnectResult,
   MqttConsoleConnection,
@@ -72,8 +73,8 @@ export default function ConnectionMethodMqttPage() {
         setConsoleSession(null);
         return null;
       });
-    } catch {
-      message.error('加载 MQTT 连接失败');
+    } catch (error) {
+      showApiError(error, '加载 MQTT 连接失败');
     } finally {
       setLoading(false);
     }
@@ -108,8 +109,8 @@ export default function ConnectionMethodMqttPage() {
               setSelectedTopic(null);
             }
             await loadConnections();
-          } catch {
-            message.error('删除失败');
+          } catch (error) {
+            showApiError(error, '删除失败');
           } finally {
             setDeletingId(null);
           }
@@ -222,8 +223,8 @@ export default function ConnectionMethodMqttPage() {
       setConsoleSession(data);
       setConnectedId(selectedConnection.id);
       message.success(`已连接：${selectedConnection.name}`);
-    } catch {
-      message.error('连接 MQTT 失败，请确认 Broker 地址与后端服务可用');
+    } catch (error) {
+      showApiError(error, '连接 MQTT 失败，请确认 Broker 地址与后端服务可用');
     } finally {
       hide();
       setConnecting(false);

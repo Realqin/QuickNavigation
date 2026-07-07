@@ -405,15 +405,36 @@ def _build_dict_maps(db: Session) -> dict[str, dict[Any, int]]:
 
 
 
+def _ensure_dict_cache(db: Session) -> dict[str, Any]:
+    """请求级 DictItem 缓存，挂在 Session 实例上，避免循环内反复查 DictItem。
+
+    在 list 类接口中，DictItem 通常不会被 sync 阶段之后修改，缓存首次构建后即可复用。
+    """
+    cache = getattr(db, "_qn_dict_cache", None)
+    if cache is None:
+        items = db.query(DictItem).all()
+        by_id: dict[int, DictItem] = {item.id: item for item in items}
+        by_type: dict[str, list[DictItem]] = {}
+        for item in items:
+            by_type.setdefault(item.dict_type, []).append(item)
+        cache = {"by_id": by_id, "by_type": by_type}
+        try:
+            db._qn_dict_cache = cache  # type: ignore[attr-defined]
+        except Exception:
+            # 某些 Session 代理对象不允许设置属性，忽略后退化为准时查询
+            pass
+    return cache
+
+
 def get_dict_item(db: Session, item_id: int, dict_type: str | None = None) -> DictItem | None:
 
-    query = db.query(DictItem).filter(DictItem.id == item_id)
-
-    if dict_type:
-
-        query = query.filter(DictItem.dict_type == dict_type)
-
-    return query.first()
+    cache = _ensure_dict_cache(db)
+    item = cache["by_id"].get(item_id)
+    if item is None:
+        return None
+    if dict_type and item.dict_type != dict_type:
+        return None
+    return item
 
 
 
@@ -1012,24 +1033,25 @@ def reorder_connections(db: Session, items: list[dict[str, int]]) -> None:
 
 
 
+def _label_ids_by_filter(db: Session, name_filter) -> set[int]:
+    cache = _ensure_dict_cache(db)
+    return {item.id for item in cache["by_type"].get(DICT_LABEL, []) if name_filter(item.name)}
+
+
 def _gitlab_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if "gitlab" in item.name.lower()}
+    return _label_ids_by_filter(db, lambda name: "gitlab" in name.lower())
 
 
 def _database_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_DATABASE}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_DATABASE)
 
 
 def _k8s_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_K8S}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_K8S)
 
 
 def _terminal_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_TERMINAL}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_TERMINAL)
 
 
 def _subscription_label_ids(db: Session) -> set[int]:
@@ -1053,8 +1075,7 @@ def connection_is_terminal_type(db: Session, conn: Connection) -> bool:
 
 
 def _mqtt_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_MQTT}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_MQTT)
 
 
 def connection_is_mqtt_type(db: Session, conn: Connection) -> bool:
@@ -1062,8 +1083,7 @@ def connection_is_mqtt_type(db: Session, conn: Connection) -> bool:
 
 
 def _kafka_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_KAFKA}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_KAFKA)
 
 
 def connection_is_kafka_type(db: Session, conn: Connection) -> bool:
@@ -1071,8 +1091,7 @@ def connection_is_kafka_type(db: Session, conn: Connection) -> bool:
 
 
 def _redis_label_ids(db: Session) -> set[int]:
-    items = db.query(DictItem).filter(DictItem.dict_type == DICT_LABEL).all()
-    return {item.id for item in items if item.name == LABEL_REDIS}
+    return _label_ids_by_filter(db, lambda name: name == LABEL_REDIS)
 
 
 def connection_is_redis_type(db: Session, conn: Connection) -> bool:
@@ -1192,7 +1211,7 @@ def build_database_subscription_links(
             "repo_path": "",
             "enabled": enabled,
             "link_kind": "database",
-            "webhook_secret": sub.webhook_secret,
+            "has_webhook_secret": bool(sub.webhook_secret),
         }
     ]
 
@@ -1223,14 +1242,35 @@ def _activity_display_time(log: ActivityLog) -> datetime:
     return log.occurred_at
 
 
+_ACTIVITY_LOG_PER_CONNECTION_LIMIT = 50
+
+
 def _load_subscription_activity_logs(
     db: Session, connection_ids: list[int]
 ) -> dict[int, list[ActivityLog]]:
     if not connection_ids:
         return {}
+    # 用窗口函数按 connection_id 分组取每组最近 PER_CONNECTION_LIMIT 条，
+    # 避免全表加载所有历史日志导致内存与 IO 爆炸。
+    from sqlalchemy import func
+
+    row_num = (
+        func.row_number()
+        .over(
+            partition_by=ActivityLog.connection_id,
+            order_by=ActivityLog.occurred_at.desc(),
+        )
+        .label("rn")
+    )
+    subq = (
+        db.query(ActivityLog.id.label("id"), row_num)
+        .filter(ActivityLog.connection_id.in_(connection_ids))
+        .subquery()
+    )
     logs = (
         db.query(ActivityLog)
-        .filter(ActivityLog.connection_id.in_(connection_ids))
+        .join(subq, ActivityLog.id == subq.c.id)
+        .filter(subq.c.rn <= _ACTIVITY_LOG_PER_CONNECTION_LIMIT)
         .order_by(ActivityLog.occurred_at.desc())
         .all()
     )
@@ -1312,10 +1352,14 @@ def list_gitlab_subscription_trees(
     project: int | None = None,
     enabled: bool | None = None,
 ) -> list[dict[str, Any]]:
-    sync_gitlab_subscriptions(db)
+    # 列表只补建缺失订阅，不做全量 refresh / K8s cluster 同步（创建/更新连接时已处理）
+    sync_gitlab_subscriptions(db, repair_only=True)
     sync_database_subscriptions(db)
-    sync_k8s_subscriptions(db)
-    label_ids = _subscription_label_ids(db)
+    sync_k8s_subscriptions(db, repair_only=True)
+    gitlab_ids = _gitlab_label_ids(db)
+    database_ids = _database_label_ids(db)
+    k8s_ids = _k8s_label_ids(db)
+    label_ids = gitlab_ids | database_ids | k8s_ids
     if not label_ids:
         return []
 
@@ -1328,26 +1372,27 @@ def list_gitlab_subscription_trees(
             query = query.filter(_json_contains(Connection.projects, project))
 
     subs = query.order_by(Connection.sort_order.asc(), Connection.id.asc()).all()
+    # 批量预取 K8s cluster，避免循环内逐条查询
+    from app.models import K8sClusterConfig
+    from app.k8s_connection_service import build_k8s_subscription_links
+
+    k8s_cluster_by_conn: dict[int, Any] = {
+        cluster.connection_id: cluster
+        for cluster in db.query(K8sClusterConfig).all()
+        if cluster.connection_id
+    }
     trees: list[dict[str, Any]] = []
     for sub in subs:
         conn = sub.connection
         if not conn:
             continue
-        if connection_is_gitlab_type(db, conn):
-            refresh_subscription_from_connection(db, sub)
+        conn_type = conn.type
+        if conn_type in gitlab_ids:
             links = build_gitlab_subscription_links(conn, sub.link_enabled)
-        elif connection_is_database_type(db, conn):
+        elif conn_type in database_ids:
             links = build_database_subscription_links(conn, sub, sub.link_enabled)
-        elif connection_is_k8s_type(db, conn):
-            from app.k8s_connection_service import (
-                build_k8s_subscription_links,
-                get_k8s_cluster_by_connection_id,
-                sync_k8s_cluster_from_connection,
-            )
-
-            cluster = get_k8s_cluster_by_connection_id(db, conn.id) or sync_k8s_cluster_from_connection(
-                db, conn
-            )
+        elif conn_type in k8s_ids:
+            cluster = k8s_cluster_by_conn.get(conn.id)
             links = build_k8s_subscription_links(
                 conn,
                 sub,
@@ -1464,7 +1509,7 @@ def ensure_k8s_subscription(db: Session, conn: Connection) -> Subscription | Non
     return sub
 
 
-def sync_k8s_subscriptions(db: Session) -> None:
+def sync_k8s_subscriptions(db: Session, *, repair_only: bool = False) -> None:
     label_ids = _k8s_label_ids(db)
     if not label_ids:
         return
@@ -1476,16 +1521,24 @@ def sync_k8s_subscriptions(db: Session) -> None:
     )
     for conn in connections:
         ensure_k8s_subscription(db, conn)
+        if repair_only:
+            continue
         from app.k8s_connection_service import sync_k8s_cluster_from_connection
 
         sync_k8s_cluster_from_connection(db, conn)
 
 
-def ensure_gitlab_subscription(db: Session, conn: Connection) -> Subscription | None:
+def ensure_gitlab_subscription(
+    db: Session,
+    conn: Connection,
+    *,
+    refresh: bool = True,
+) -> Subscription | None:
     if not connection_is_gitlab_type(db, conn):
         return conn.subscription
     if conn.subscription:
-        refresh_subscription_from_connection(db, conn.subscription)
+        if refresh:
+            refresh_subscription_from_connection(db, conn.subscription)
         return conn.subscription
     sub = create_subscription(
         db,
@@ -1495,7 +1548,7 @@ def ensure_gitlab_subscription(db: Session, conn: Connection) -> Subscription | 
     return sub
 
 
-def sync_gitlab_subscriptions(db: Session) -> None:
+def sync_gitlab_subscriptions(db: Session, *, repair_only: bool = False) -> None:
     label_ids = _gitlab_label_ids(db)
     if not label_ids:
         return
@@ -1506,7 +1559,7 @@ def sync_gitlab_subscriptions(db: Session) -> None:
         .all()
     )
     for conn in connections:
-        ensure_gitlab_subscription(db, conn)
+        ensure_gitlab_subscription(db, conn, refresh=not repair_only)
 
 
 def create_subscription(db: Session, data: SubscriptionCreate) -> Subscription:
@@ -1687,13 +1740,13 @@ def list_activity_logs(
     return query.order_by(ActivityLog.occurred_at.desc()).limit(limit).all()
 
 
-async def backfill_missing_commit_times(
+def backfill_missing_commit_times(
     db: Session,
     logs: list[ActivityLog],
     *,
     limit: int = 30,
 ) -> None:
-    from app.repo_service import extract_commit_sha, fetch_commit_time
+    from app.repo_service import extract_commit_sha, fetch_commit_time_sync
 
     updated = 0
     for log in logs:
@@ -1709,7 +1762,7 @@ async def backfill_missing_commit_times(
         provider = str(payload.get("provider") or log.source_type or "gitlab")
         if provider not in {"gitlab", "github"}:
             continue
-        committed_at = await fetch_commit_time(provider, str(repo), str(sha))
+        committed_at = fetch_commit_time_sync(provider, str(repo), str(sha))
         if not committed_at:
             continue
         payload["committed_at"] = committed_at
@@ -1746,21 +1799,20 @@ def handle_database_webhook(db: Session, payload: DatabaseWebhookPayload) -> Act
 
 
 
-    if payload.connection_id:
+    if not payload.webhook_secret:
 
-        conn = db.query(Connection).filter(Connection.id == payload.connection_id).first()
+        raise ValueError("缺少 webhook_secret，无法验证 webhook 来源")
 
-        if conn and conn.subscription:
+    sub = db.query(Subscription).filter(Subscription.webhook_secret == payload.webhook_secret).first()
 
-            sub = conn.subscription
+    if sub:
 
-    elif payload.webhook_secret:
+        conn = sub.connection
 
-        sub = db.query(Subscription).filter(Subscription.webhook_secret == payload.webhook_secret).first()
+    # 若调用方额外传了 connection_id，必须与 secret 对应的连接一致，否则视为伪造
+    if conn and payload.connection_id and conn.id != payload.connection_id:
 
-        if sub:
-
-            conn = sub.connection
+        raise ValueError("webhook_secret 与 connection_id 不匹配")
 
 
 

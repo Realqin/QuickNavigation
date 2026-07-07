@@ -222,7 +222,9 @@ export default function MainLayout() {
         <Layout className="app-main">
           <Content className={`app-content${activeTabType === 'home' ? ' app-content--home' : ''}`}>
             <Tabs
-              className={`app-tabs${activeTabType === 'home' ? ' app-tabs--home' : ''}`}
+              className={`app-tabs${activeTabType === 'home' ? ' app-tabs--home' : ''}${
+                activeTabType === 'serviceMonitor' ? ' app-tabs--service-monitor' : ''
+              }`}
               type="editable-card"
               hideAdd
               animated={{ inkBar: true, tabPane: false }}

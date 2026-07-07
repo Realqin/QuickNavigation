@@ -32,6 +32,7 @@ import { openMqttConsole } from '../utils/mqttNavigation';
 import { openRedpandaInNewTab } from '../utils/redpanda';
 import { openRedisinsightInNewTab } from '../utils/redisinsight';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
+import { showApiError } from '../utils/apiError';
 
 const EXPAND_KEY = 'quicknav-collapse';
 const PROJECT_KEY = 'quicknav-project';
@@ -106,8 +107,8 @@ export default function HomePage() {
         return next;
       });
       setLogs(logList);
-    } catch {
-      message.error('加载数据失败');
+    } catch (error) {
+      showApiError(error, '加载数据失败');
     } finally {
       setLoading(false);
     }
@@ -166,8 +167,8 @@ export default function HomePage() {
     );
     try {
       await reorderConnections(scope, items);
-    } catch {
-      message.error('排序保存失败');
+    } catch (error) {
+      showApiError(error, '排序保存失败');
       loadData();
     }
   };
@@ -184,8 +185,8 @@ export default function HomePage() {
       setModalOpen(false);
       setEditing(null);
       loadData();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 
@@ -195,8 +196,8 @@ export default function HomePage() {
     try {
       const updated = await markLogRead(log.id);
       setLogs((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-    } catch {
-      message.error('标记已读失败');
+    } catch (error) {
+      showApiError(error, '标记已读失败');
     }
   };
 
@@ -205,8 +206,8 @@ export default function HomePage() {
       await deleteConnection(conn.id);
       message.success('删除成功');
       loadData();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   };
 
@@ -222,7 +223,7 @@ export default function HomePage() {
         if (error instanceof Error && error.message === 'browser blocked popup') {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
         } else {
-          message.error('打开 MQTT 控制台失败');
+          showApiError(error, '打开 MQTT 控制台失败');
         }
       } finally {
         hide();
@@ -238,7 +239,7 @@ export default function HomePage() {
         if (error instanceof Error && error.message === 'browser blocked popup') {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
         } else {
-          message.error('打开 Redpanda Console 失败，请确认服务已启动（端口 8082）');
+          showApiError(error, '打开 Redpanda Console 失败，请确认服务已启动（端口 8082）');
         }
       } finally {
         hide();
@@ -254,7 +255,7 @@ export default function HomePage() {
         if (error instanceof Error && error.message === 'browser blocked popup') {
           message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
         } else {
-          message.error('打开 RedisInsight 失败，请确认服务已启动（端口 5540）');
+          showApiError(error, '打开 RedisInsight 失败，请确认服务已启动（端口 5540）');
         }
       } finally {
         hide();
@@ -278,15 +279,9 @@ export default function HomePage() {
       if (error instanceof Error && error.message === 'browser blocked popup') {
         message.warning('浏览器拦截了新标签页，请允许弹窗后重试');
       } else if (kind === 'database') {
-        message.error('打开数据库控制台失败，请确认 OmniDB 已启动（端口 8081）');
+        showApiError(error, '打开数据库控制台失败，请确认 OmniDB 已启动（端口 8081）');
       } else {
-        const detail =
-          error && typeof error === 'object' && 'response' in error
-            ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-            : undefined;
-        message.error(
-          detail || '打开终端失败，请确认 Sshwifty 已启动（端口 8182）且连接已保存密码',
-        );
+        showApiError(error, '打开终端失败，请确认 Sshwifty 已启动（端口 8182）且连接已保存密码');
       }
     } finally {
       hide();

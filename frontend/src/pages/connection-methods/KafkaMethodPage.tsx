@@ -24,6 +24,7 @@ import KafkaConsoleConnectionModal from '../../components/KafkaConsoleConnection
 import type { KafkaConsoleConnection, KafkaConsoleConnectionFormValues } from '../../types';
 import { registerPageCleanup } from '../../utils/pageCleanup';
 import { resolveRedpandaOpenUrl } from '../../utils/redpanda';
+import { showApiError } from '../../utils/apiError';
 
 export default function KafkaMethodPage() {
   const { message, modal } = App.useApp();
@@ -63,8 +64,8 @@ export default function KafkaMethodPage() {
         setConsoleSrc('');
         return null;
       });
-    } catch {
-      message.error('加载 Kafka 连接失败');
+    } catch (error) {
+      showApiError(error, '加载 Kafka 连接失败');
     } finally {
       setLoading(false);
     }
@@ -109,8 +110,8 @@ export default function KafkaMethodPage() {
               setSelectedId(null);
             }
             await loadConnections();
-          } catch {
-            message.error('删除失败');
+          } catch (error) {
+            showApiError(error, '删除失败');
           } finally {
             setDeletingId(null);
           }
@@ -192,8 +193,8 @@ export default function KafkaMethodPage() {
       setConsoleSrc(resolveRedpandaOpenUrl(data.embed_url));
       setConnectedId(selectedConnection.id);
       message.success(`已连接：${selectedConnection.name}`);
-    } catch {
-      message.error('连接 Redpanda Console 失败，请确认服务已启动（端口 8082）');
+    } catch (error) {
+      showApiError(error, '连接 Redpanda Console 失败，请确认服务已启动（端口 8082）');
     } finally {
       hide();
       setConnecting(false);

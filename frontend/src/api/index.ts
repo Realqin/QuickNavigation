@@ -52,6 +52,8 @@ import type {
   K8sRestartMonitorOption,
 } from '../types/k8s';
 
+export { getApiErrorMessage, showApiError } from '../utils/apiError';
+
 const client = axios.create({
   baseURL: resolveApiBaseUrl(),
   timeout: 15000,

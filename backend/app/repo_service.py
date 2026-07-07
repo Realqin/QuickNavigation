@@ -617,6 +617,15 @@ async def fetch_commit_time(provider: str, repo: str, sha: str) -> str | None:
     return None
 
 
+def fetch_commit_time_sync(provider: str, repo: str, sha: str) -> str | None:
+    """同步版本的 fetch_commit_time，供 def 路由在线程池内调用，避免阻塞事件循环。"""
+    if provider == "gitlab":
+        return _fetch_gitlab_commit_time_sync(repo, sha)
+    if provider == "github":
+        return _fetch_github_commit_time_sync(repo, sha)
+    return None
+
+
 async def _fetch_github_commit_time(repo: str, sha: str) -> str | None:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -650,6 +659,39 @@ async def _fetch_github_commit_time(repo: str, sha: str) -> str | None:
     return None
 
 
+def _fetch_github_commit_time_sync(repo: str, sha: str) -> str | None:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "QuickNavigation/1.0",
+    }
+    token = get_github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    url = f"https://api.github.com/repos/{repo}/commits/{sha}"
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True, trust_env=False) as client:
+            response = client.get(url, headers=headers)
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            commit = data.get("commit") if isinstance(data, dict) else None
+            if not isinstance(commit, dict):
+                return None
+            committer = commit.get("committer")
+            if isinstance(committer, dict):
+                ts = committer.get("date")
+                if isinstance(ts, str) and ts.strip():
+                    return ts.strip()
+            author = commit.get("author")
+            if isinstance(author, dict):
+                ts = author.get("date")
+                if isinstance(ts, str) and ts.strip():
+                    return ts.strip()
+    except httpx.HTTPError:
+        logger.exception("GitHub commit time fetch failed for %s@%s", repo, sha)
+    return None
+
+
 async def _fetch_gitlab_commit_time(project_path: str, sha: str) -> str | None:
     encoded = urllib.parse.quote(project_path, safe="")
     base = get_gitlab_base_url().rstrip("/")
@@ -661,6 +703,31 @@ async def _fetch_gitlab_commit_time(project_path: str, sha: str) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, trust_env=False) as client:
             response = await client.get(url, headers=headers)
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            if not isinstance(data, dict):
+                return None
+            for key in ("committed_date", "authored_date", "created_at"):
+                ts = data.get(key)
+                if isinstance(ts, str) and ts.strip():
+                    return ts.strip()
+    except httpx.HTTPError:
+        logger.exception("GitLab commit time fetch failed for %s@%s", project_path, sha)
+    return None
+
+
+def _fetch_gitlab_commit_time_sync(project_path: str, sha: str) -> str | None:
+    encoded = urllib.parse.quote(project_path, safe="")
+    base = get_gitlab_base_url().rstrip("/")
+    url = f"{base}/api/v4/projects/{encoded}/repository/commits/{sha}"
+    headers = {"User-Agent": "QuickNavigation/1.0"}
+    token = get_gitlab_token()
+    if token:
+        headers["PRIVATE-TOKEN"] = token
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True, trust_env=False) as client:
+            response = client.get(url, headers=headers)
             if response.status_code != 200:
                 return None
             data = response.json()
@@ -789,42 +856,54 @@ def _resolve_log_clone_url(db, log, repo: str, provider: str) -> str | None:
     return None
 
 
+_BACKGROUND_DIFF_SEMAPHORE: asyncio.Semaphore | None = None
+_BACKGROUND_DIFF_CONCURRENCY = 4
+
+
+def _get_diff_semaphore() -> asyncio.Semaphore:
+    global _BACKGROUND_DIFF_SEMAPHORE
+    if _BACKGROUND_DIFF_SEMAPHORE is None:
+        _BACKGROUND_DIFF_SEMAPHORE = asyncio.Semaphore(_BACKGROUND_DIFF_CONCURRENCY)
+    return _BACKGROUND_DIFF_SEMAPHORE
+
+
 async def fetch_log_diff_background(log_id: int, provider: str, repo: str, sha: str) -> None:
     from app.models import ActivityLog
     from app.schemas import ActivityLogOut
     from app.websocket_manager import ws_manager
 
-    try:
-        db = SessionLocal()
+    async with _get_diff_semaphore():
         try:
-            log = db.query(ActivityLog).filter(ActivityLog.id == log_id).first()
-            if not log:
-                return
-            payload = dict(log.payload or {})
-            clone_url = _resolve_log_clone_url(db, log, str(repo), provider)
-            branch = str(payload.get("branch") or "").strip() or None
-            result = await fetch_commit_diff(
-                provider,
-                repo,
-                sha,
-                clone_url=clone_url,
-                branch=branch,
-                subscription_id=log.subscription_id,
-            )
-            if not result.diff:
-                return
-            payload["diff"] = result.diff
-            payload.pop("diff_error", None)
-            log.payload = payload
-            flag_modified(log, "payload")
-            db.commit()
-            db.refresh(log)
-            data = ActivityLogOut.model_validate(log).model_dump(mode="json")
-            await ws_manager.broadcast({"type": "log:new", "data": data})
-        finally:
-            db.close()
-    except Exception:
-        logger.exception("Background diff fetch failed for log %s", log_id)
+            db = SessionLocal()
+            try:
+                log = db.query(ActivityLog).filter(ActivityLog.id == log_id).first()
+                if not log:
+                    return
+                payload = dict(log.payload or {})
+                clone_url = _resolve_log_clone_url(db, log, str(repo), provider)
+                branch = str(payload.get("branch") or "").strip() or None
+                result = await fetch_commit_diff(
+                    provider,
+                    repo,
+                    sha,
+                    clone_url=clone_url,
+                    branch=branch,
+                    subscription_id=log.subscription_id,
+                )
+                if not result.diff:
+                    return
+                payload["diff"] = result.diff
+                payload.pop("diff_error", None)
+                log.payload = payload
+                flag_modified(log, "payload")
+                db.commit()
+                db.refresh(log)
+                data = ActivityLogOut.model_validate(log).model_dump(mode="json")
+                await ws_manager.broadcast({"type": "log:new", "data": data})
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Background diff fetch failed for log %s", log_id)
 
 
 def schedule_log_diff(log_id: int, provider: str, repo: str, sha: str) -> None:

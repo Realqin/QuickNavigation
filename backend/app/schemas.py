@@ -350,7 +350,7 @@ class GitlabSubscriptionLinkOut(BaseModel):
     enabled: bool
     link_kind: str = "gitlab"
     cluster_id: int | None = None
-    webhook_secret: str | None = None
+    has_webhook_secret: bool = False
     last_updated_at: datetime | None = None
     api_scan_status: str | None = None
     api_endpoint_count: int = 0
@@ -369,7 +369,7 @@ class GitlabSubscriptionTreeOut(BaseModel):
 class SubscriptionOut(SubscriptionBase):
     id: int
     connection_id: int
-    webhook_secret: str
+    has_webhook_secret: bool = False
     webhook_url: str | None = None
     connection_name: str | None = None
     connection_url: str | None = None
@@ -612,6 +612,7 @@ class K8sClusterConfigBase(BaseModel):
     provider: str = Field(default="native", max_length=32)
     auth_type: str = Field(default="password", max_length=16)
     username: str | None = Field(default=None, max_length=128)
+    cluster_name: str | None = Field(default=None, max_length=128)
     verify_ssl: bool = False
 
     @field_validator("api_server")
@@ -653,6 +654,7 @@ class K8sClusterConfigUpdate(BaseModel):
     provider: str | None = Field(default=None, max_length=32)
     auth_type: str | None = Field(default=None, max_length=16)
     username: str | None = Field(default=None, max_length=128)
+    cluster_name: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=1024)
     verify_ssl: bool | None = None
 

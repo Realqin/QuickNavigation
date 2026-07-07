@@ -415,6 +415,44 @@ a {
 
 
 
+.app-tabs--service-monitor > .ant-tabs-content-holder {
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-tabs--service-monitor > .ant-tabs-content-holder > .ant-tabs-content {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.app-tabs--service-monitor .ant-tabs-content {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.app-tabs--service-monitor .ant-tabs-tabpane-active {
+  display: flex !important;
+  flex-direction: column;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden;
+}
+
+.app-tabs--service-monitor .tab-pane-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+
+
 .embedded-console-page {
 
   height: calc(100vh - 56px - 46px);
@@ -1409,9 +1447,11 @@ html:has(.embedded-console-page--standalone) body {
 .service-monitor-page {
   display: flex;
   position: relative;
-  height: calc(100vh - 56px - 46px);
+  flex: 1;
   min-height: 0;
+  height: calc(100vh - 56px - 46px);
   background: #fff;
+  overflow: hidden;
 }
 
 .service-monitor-page__sidebar {
@@ -1575,8 +1615,13 @@ html:has(.embedded-console-page--standalone) body {
   background: #f5f7fb;
 }
 
-.service-monitor-page__table {
+.service-monitor-page__table-wrap {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.service-monitor-page__table {
   min-height: 0;
 }
 
@@ -1590,9 +1635,11 @@ html:has(.embedded-console-page--standalone) body {
   flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   padding: 12px 18px 14px;
   border-top: 1px solid #eef2f7;
   background: #fff;
+  z-index: 2;
 }
 
 .service-monitor-page__row--pod > td {
@@ -1854,6 +1901,47 @@ html:has(.embedded-console-page--standalone) body {
 
 .service-monitor-page__watermark-row--delayed > td {
   background: #fff7f6;
+}
+
+@media (max-width: 768px) {
+  .service-monitor-page {
+    height: calc(100dvh - 56px - 46px);
+  }
+
+  .service-monitor-page__main-head {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .service-monitor-page__main-title {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .service-monitor-page__pagination {
+    justify-content: center;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .service-monitor-page__pagination .ant-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+  }
+
+  .service-monitor-page__pagination .ant-pagination-total-text {
+    flex: 1 1 100%;
+    margin-inline-end: 0 !important;
+    text-align: center;
+  }
+
+  .service-monitor-page__pagination .ant-pagination-options {
+    margin-inline-start: 0 !important;
+  }
 }
 
 

@@ -788,14 +788,53 @@ def scan_subscription_schema(db: Session, sub: Subscription, *, baseline_only: b
 
 
 async def scan_subscription_schema_async(
-    db: Session,
     sub: Subscription,
     *,
     baseline_only: bool = False,
 ) -> dict[str, Any]:
-    result = await asyncio.to_thread(scan_subscription_schema, db, sub, baseline_only=baseline_only)
-    for log in result.get("logs") or []:
-        await _broadcast_log(log)
+    """异步巡检入口。内部在线程池中自建独立 Session，避免跨线程传递 Session。
+
+    返回纯数据 dict（logs 已序列化为 list[dict]，snapshot 转为 dict），调用方无需再访问 ORM。
+    """
+    from app.database import SessionLocal
+    from app.schemas import ActivityLogOut
+
+    subscription_id = sub.id
+
+    def _run() -> dict[str, Any]:
+        db = SessionLocal()
+        try:
+            local_sub = db.get(Subscription, subscription_id)
+            if not local_sub:
+                raise ValueError(f"订阅 {subscription_id} 不存在")
+            raw = scan_subscription_schema(db, local_sub, baseline_only=baseline_only)
+            logs = raw.get("logs") or []
+            serialized_logs = [
+                ActivityLogOut.model_validate(log).model_dump(mode="json") for log in logs
+            ]
+            snapshot = raw.get("snapshot")
+            snapshot_dict: dict[str, Any] | None = None
+            if snapshot is not None:
+                snapshot_dict = {
+                    "snapshot": snapshot.snapshot,
+                    "snapshot_hash": snapshot.snapshot_hash,
+                    "last_scan_at": snapshot.last_scan_at,
+                    "last_error": snapshot.last_error,
+                }
+            return {
+                "subscription_id": raw["subscription_id"],
+                "changes_detected": raw["changes_detected"],
+                "logs_created": raw["logs_created"],
+                "logs": serialized_logs,
+                "snapshot": snapshot_dict,
+                "was_first_scan": raw["was_first_scan"],
+            }
+        finally:
+            db.close()
+
+    result = await asyncio.to_thread(_run)
+    for log_dict in result.get("logs") or []:
+        await ws_manager.broadcast({"type": "log:new", "data": log_dict})
     return result
 
 
@@ -818,12 +857,12 @@ def clear_schema_change_logs(db: Session, subscription_id: int) -> int:
 
 async def reset_schema_monitor_baseline(db: Session, sub: Subscription) -> dict[str, Any]:
     deleted_logs = clear_schema_change_logs(db, sub.id)
-    result = await scan_subscription_schema_async(db, sub, baseline_only=True)
+    result = await scan_subscription_schema_async(sub, baseline_only=True)
     snapshot = result.get("snapshot")
     if isinstance(snapshot, dict):
         snapshot_data = snapshot.get("snapshot")
     else:
-        snapshot_data = snapshot.snapshot if snapshot else None
+        snapshot_data = None
     table_count = len((snapshot_data or {}).get("tables") or {})
     database_count = len((snapshot_data or {}).get("databases") or [])
     return {

@@ -28,6 +28,7 @@ import {
   formatProxyResponseBody,
   renderCaseExecuteStatusCell,
 } from '../../utils/caseExecuteStatus';
+import { getApiErrorMessage, showApiError } from '../../utils/apiError';
 import { buildDebugUrl } from './debugUtils';
 
 interface ApiMonitorEndpointCasesPanelProps {
@@ -103,8 +104,8 @@ export default function ApiMonitorEndpointCasesPanel({
         page_size: 200,
       });
       setCases(result.items);
-    } catch {
-      appMessage.error('加载关联用例失败');
+    } catch (error) {
+      showApiError(error, '加载关联用例失败');
     } finally {
       setLoading(false);
     }
@@ -144,8 +145,8 @@ export default function ApiMonitorEndpointCasesPanel({
       setCases(result.items);
       setVisible(true);
       appMessage.success(result.created > 0 ? '已生成默认冒烟用例' : '已加载关联用例');
-    } catch {
-      appMessage.error('用例生成失败');
+    } catch (error) {
+      showApiError(error, '用例生成失败');
     } finally {
       setGenerating(false);
     }
@@ -166,8 +167,8 @@ export default function ApiMonitorEndpointCasesPanel({
       await deleteApiTestCase(id);
       appMessage.success('删除成功');
       await loadCases();
-    } catch {
-      appMessage.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   }, [appMessage, loadCases]);
 
@@ -227,9 +228,7 @@ export default function ApiMonitorEndpointCasesPanel({
         detail,
       });
     } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (error instanceof Error ? error.message : '执行失败');
+      const detail = getApiErrorMessage(error, '执行失败');
       try {
         const saved = await saveApiTestCaseExecutionResult(record.id, {
           passed: false,
@@ -262,8 +261,8 @@ export default function ApiMonitorEndpointCasesPanel({
       setEditing(null);
       setVisible(true);
       await loadCases();
-    } catch {
-      appMessage.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
       throw new Error('save failed');
     }
   };

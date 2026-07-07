@@ -2,6 +2,7 @@ import { CloseOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { App, Button, Input, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import type { MqttSubscription } from '../types';
+import { showApiError } from '../utils/apiError';
 import '../features/mqtt-console/mqtt-console.css';
 
 interface Props {
@@ -40,8 +41,8 @@ export default function MqttMethodSubscriptionPanel({
   const persist = async (next: MqttSubscription[]) => {
     try {
       await onChange(next);
-    } catch {
-      message.error('保存订阅失败');
+    } catch (error) {
+      showApiError(error, '保存订阅失败');
     }
   };
 

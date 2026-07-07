@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { fetchPublicConfig } from '../../api';
 import type { PublicConfig } from '../../types';
 import { resolveServiceBaseUrl } from '../../utils/serviceUrl';
+import { showApiError } from '../../utils/apiError';
 
 type ConsoleConfigKey = keyof Pick<
   PublicConfig,
@@ -34,9 +35,9 @@ export default function EmbeddedConsolePage({ configKey, defaultPort, emptyHint 
         const resolved = resolveServiceBaseUrl(raw, defaultPort);
         setSrc(resolved);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          message.error('加载控制台地址失败');
+          showApiError(error, '加载控制台地址失败');
         }
       })
       .finally(() => {

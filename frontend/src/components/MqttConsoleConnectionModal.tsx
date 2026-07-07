@@ -3,6 +3,7 @@ import { App, Button, Form, Input, InputNumber, Modal } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
 import { testMqttConsoleConnection } from '../api';
 import type { MqttConsoleConnection, MqttConsoleConnectionFormValues } from '../types';
+import { showApiError } from '../utils/apiError';
 import './ConnectionFormModal.css';
 
 interface Props {
@@ -82,8 +83,8 @@ export default function MqttConsoleConnectionModal({
       } else {
         message.error(result.message);
       }
-    } catch {
-      message.error('测试连接失败');
+    } catch (error) {
+      showApiError(error, '测试连接失败');
     } finally {
       setTesting(false);
     }

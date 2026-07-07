@@ -37,6 +37,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
+_DEFAULT_GITHUB_SECRET = "change-me-github-secret"
+_DEFAULT_GITLAB_SECRET = "change-me-gitlab-secret"
+
+
+def _is_default_github_secret() -> bool:
+    return settings.github_webhook_secret.strip() == _DEFAULT_GITHUB_SECRET
+
+
+def _is_default_gitlab_secret() -> bool:
+    return settings.gitlab_webhook_secret.strip() == _DEFAULT_GITLAB_SECRET
+
+
 def _verify_github_signature(body: bytes, signature: str | None) -> bool:
     if not signature or not signature.startswith("sha256="):
         return False
@@ -50,9 +62,10 @@ def _verify_github_signature(body: bytes, signature: str | None) -> bool:
 
 def _verify_gitlab_token(token: str | None) -> bool:
     secret = settings.gitlab_webhook_secret.strip()
-    if not secret or secret == "change-me-gitlab-secret":
-        return True
-    return bool(token and token == secret)
+    if not secret or secret == _DEFAULT_GITLAB_SECRET:
+        # fail-closed：默认密钥拒绝，强制部署方修改 .env
+        return False
+    return bool(token and hmac.compare_digest(token, secret))
 
 
 async def _broadcast_log(log: Any) -> None:
@@ -216,9 +229,13 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
     signature = request.headers.get("X-Hub-Signature-256")
     event = request.headers.get("X-GitHub-Event", "unknown")
 
-    if settings.github_webhook_secret != "change-me-github-secret":
-        if not _verify_github_signature(body, signature):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+    if _is_default_github_secret():
+        raise HTTPException(
+            status_code=401,
+            detail="GitHub webhook secret 未配置，请在 .env 中设置非默认的 GITHUB_WEBHOOK_SECRET",
+        )
+    if not _verify_github_signature(body, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     payload = json.loads(body)
     repo_full_name = payload.get("repository", {}).get("full_name")
@@ -273,8 +290,14 @@ async def database_webhook(
     secret: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    if secret:
-        payload.webhook_secret = secret
+    # fail-closed：必须带 webhook_secret（query 或 body），不再支持仅凭 connection_id
+    resolved_secret = (secret or payload.webhook_secret or "").strip()
+    if not resolved_secret:
+        raise HTTPException(
+            status_code=401,
+            detail="缺少 webhook_secret，请在 URL ?secret= 或请求体中提供",
+        )
+    payload.webhook_secret = resolved_secret
     try:
         log = handle_database_webhook(db, payload)
     except ValueError as exc:

@@ -31,6 +31,7 @@ import {
   K8S_RESTART_MONITOR_OPTIONS,
   getRestartMonitorLabel,
 } from '../types/k8s';
+import { showApiError } from '../utils/apiError';
 
 interface K8sAlarmMonitorPanelProps {
   open: boolean;
@@ -46,12 +47,6 @@ interface ServiceEditDraft {
 type EnabledFilter = 'all' | 'enabled' | 'disabled';
 
 const SERVICE_TABLE_SCROLL_Y = 'min(56vh, 520px)';
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return (
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
-  );
-}
 
 function formatWatermarkMinutes(value: number | null | undefined) {
   if (value == null || value <= 0) {
@@ -104,7 +99,7 @@ export default function K8sAlarmMonitorPanel({
       setGroups(list);
       setGroupPage(1);
     } catch (error) {
-      message.error(getErrorMessage(error, '加载报警监控分组失败'));
+      showApiError(error, '加载报警监控分组失败');
     } finally {
       setGroupsLoading(false);
     }
@@ -120,7 +115,7 @@ export default function K8sAlarmMonitorPanel({
       await loadGroups();
       message.success(`已同步 ${result.groups_count} 个分组`);
     } catch (error) {
-      message.error(getErrorMessage(error, '同步报警监控分组失败'));
+      showApiError(error, '同步报警监控分组失败');
     } finally {
       setSyncingAll(false);
     }
@@ -138,7 +133,7 @@ export default function K8sAlarmMonitorPanel({
         setEditDrafts(buildDraftsFromServices(list));
         return list;
       } catch (error) {
-        message.error(getErrorMessage(error, '加载服务监控配置失败'));
+        showApiError(error, '加载服务监控配置失败');
         return [];
       } finally {
         setServicesLoading(false);
@@ -158,7 +153,7 @@ export default function K8sAlarmMonitorPanel({
         await loadServices(namespace);
         message.success(`已同步服务列表，共 ${result.services_count} 个服务`);
       } catch (error) {
-        message.error(getErrorMessage(error, '同步服务列表失败'));
+        showApiError(error, '同步服务列表失败');
       } finally {
         setServicesLoading(false);
       }
@@ -230,7 +225,7 @@ export default function K8sAlarmMonitorPanel({
       );
       message.success(enabled ? '已开启分组监控' : '已关闭分组监控');
     } catch (error) {
-      message.error(getErrorMessage(error, '更新分组监控开关失败'));
+      showApiError(error, '更新分组监控开关失败');
     } finally {
       setSwitchingNamespace(null);
     }
@@ -276,7 +271,7 @@ export default function K8sAlarmMonitorPanel({
       await loadServices(activeNamespace);
       message.success('监控配置已保存');
     } catch (error) {
-      message.error(getErrorMessage(error, '保存监控配置失败'));
+      showApiError(error, '保存监控配置失败');
     } finally {
       setSavingAll(false);
     }

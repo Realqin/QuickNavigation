@@ -3,16 +3,16 @@ import { resolveApiBaseUrl } from './apiBase';
 
 export type AiAnalysisStreamEvent =
   | { type: 'status'; message: string }
-  | { type: 'reasoning'; delta: string; text: string }
-  | { type: 'content'; delta: string; text: string }
+  | { type: 'reasoning'; delta: string; text?: string }
+  | { type: 'content'; delta: string; text?: string }
   | { type: 'done'; result: AiAnalysisResult }
   | { type: 'error'; detail: string };
 
 export interface AiAnalysisStreamHandlers {
   onEvent?: (event: AiAnalysisStreamEvent) => void;
   onStatus?: (message: string) => void;
-  onReasoning?: (text: string, delta: string) => void;
-  onContent?: (text: string, delta: string) => void;
+  onReasoning?: (delta: string) => void;
+  onContent?: (delta: string) => void;
   onDone?: (result: AiAnalysisResult) => void;
   onError?: (detail: string) => void;
 }
@@ -41,11 +41,11 @@ function dispatchEvent(event: AiAnalysisStreamEvent, handlers: AiAnalysisStreamH
     return;
   }
   if (event.type === 'reasoning') {
-    handlers.onReasoning?.(event.text, event.delta);
+    handlers.onReasoning?.(event.delta);
     return;
   }
   if (event.type === 'content') {
-    handlers.onContent?.(event.text, event.delta);
+    handlers.onContent?.(event.delta);
     return;
   }
   if (event.type === 'done') {

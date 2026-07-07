@@ -10,6 +10,7 @@ import {
   updateSchemaMonitor,
 } from '../api';
 import type { SchemaMonitorStatus } from '../types';
+import { getApiErrorMessage, showApiError } from '../utils/apiError';
 
 interface Props {
   open: boolean;
@@ -82,8 +83,8 @@ export default function SchemaMonitorModal({
         include_databases: joinList(data.include_databases),
         exclude_databases: joinList(data.exclude_databases),
       });
-    } catch {
-      message.error('加载结构巡检配置失败');
+    } catch (error) {
+      showApiError(error, '加载结构巡检配置失败');
     } finally {
       setLoading(false);
     }
@@ -137,8 +138,8 @@ export default function SchemaMonitorModal({
       setStatus(data);
       form.setFieldValue('password', '');
       message.success('已保存');
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     } finally {
       setLoading(false);
     }
@@ -162,23 +163,19 @@ export default function SchemaMonitorModal({
       } else {
         message.error(result.message);
       }
-    } catch {
-      message.error('连通性测试失败');
+    } catch (error) {
+      showApiError(error, '连通性测试失败');
     } finally {
       setPinging(false);
     }
   };
 
-  const extractErrorMessage = (error: unknown, fallback: string) => {
-    const axiosError = error as AxiosError<{ detail?: string }>;
-    const detail = axiosError.response?.data?.detail;
-    if (typeof detail === 'string' && detail.trim()) {
-      return detail;
-    }
+  const formatSchemaScanError = (error: unknown, fallback: string) => {
+    const axiosError = error as AxiosError;
     if (axiosError.code === 'ECONNABORTED') {
       return '巡检超时，库表较多时请稍候再试或缩小监控范围';
     }
-    return fallback;
+    return getApiErrorMessage(error, fallback);
   };
 
   const handleScan = async () => {
@@ -199,7 +196,7 @@ export default function SchemaMonitorModal({
       message.success(result.message);
       await loadStatus(subscriptionId);
     } catch (error) {
-      message.error(extractErrorMessage(error, '巡检失败'));
+      message.error(formatSchemaScanError(error, '巡检失败'));
     } finally {
       hide();
       setScanning(false);
@@ -215,7 +212,7 @@ export default function SchemaMonitorModal({
       message.success(result.message);
       await loadStatus(subscriptionId);
     } catch (error) {
-      message.error(extractErrorMessage(error, '重置基准失败'));
+      message.error(formatSchemaScanError(error, '重置基准失败'));
     } finally {
       hide();
       setResetting(false);

@@ -3,6 +3,7 @@ import { App, Button, Form, Input, Modal, Select, Switch } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
 import { connectK8sCluster, createK8sCluster, updateK8sCluster } from '../api';
 import type { K8sClusterConfig, K8sClusterFormValues } from '../types/k8s';
+import { showApiError } from '../utils/apiError';
 import './ConnectionFormModal.css';
 
 interface Props {
@@ -17,18 +18,13 @@ const formLayout = {
   wrapperCol: { flex: 'auto' },
 };
 
-function getErrorMessage(error: unknown, fallback: string) {
-  return (
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
-  );
-}
-
 export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm<K8sClusterFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const authType = Form.useWatch('auth_type', form);
+  const provider = Form.useWatch('provider', form);
 
   const initialValues = useMemo<K8sClusterFormValues>(
     () =>
@@ -39,6 +35,7 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
             provider: cluster.provider,
             auth_type: cluster.auth_type,
             username: cluster.username ?? '',
+            cluster_name: cluster.cluster_name ?? '',
             password: '',
             verify_ssl: cluster.verify_ssl,
           }
@@ -48,6 +45,7 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
             provider: 'native',
             auth_type: 'password',
             username: '',
+            cluster_name: '',
             password: '',
             verify_ssl: false,
           },
@@ -67,6 +65,7 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
       provider: values.provider,
       auth_type: values.auth_type,
       username: values.username?.trim() || undefined,
+      cluster_name: values.cluster_name?.trim() || undefined,
       verify_ssl: Boolean(values.verify_ssl),
     };
     if (password || !cluster?.password_set) {
@@ -90,7 +89,7 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
       message.success(cluster ? '更新成功' : '创建成功');
       onSaved(saved);
     } catch (error) {
-      message.error(getErrorMessage(error, '保存 K8s 连接失败'));
+      showApiError(error, '保存 K8s 连接失败');
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +105,7 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
       message.success(`${result.message}${versionText}${latencyText}`);
       onSaved(saved);
     } catch (error) {
-      message.error(getErrorMessage(error, '测试 K8s 连接失败'));
+      showApiError(error, '测试 K8s 连接失败');
     } finally {
       setTesting(false);
     }
@@ -147,8 +146,18 @@ export default function K8sClusterFormModal({ open, cluster, onCancel, onSaved }
           label="集群地址"
           rules={[{ required: true, message: '请输入集群访问地址' }]}
         >
-          <Input placeholder="http://10.100.0.11:30880" />
+          <Input placeholder={provider === 'kuboard' ? 'http://10.100.0.249:30080' : 'http://10.100.0.11:30880'} />
         </Form.Item>
+        {provider === 'kuboard' ? (
+          <Form.Item
+            name="cluster_name"
+            label="K8s 集群名"
+            rules={[{ required: true, message: '请输入 Kuboard 内部集群标识' }]}
+            extra="Kuboard URL 中的集群名，如 /kubernetes/slimsys/... 中的 slimsys"
+          >
+            <Input placeholder="slimsys" />
+          </Form.Item>
+        ) : null}
         <Form.Item name="provider" label="来源">
           <Select
             options={[

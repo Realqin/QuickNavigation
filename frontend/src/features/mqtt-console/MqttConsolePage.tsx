@@ -8,6 +8,7 @@ import {
   registerEmbedSessionCleanup,
   scheduleEmbedSessionClose,
 } from '../../utils/embedSession';
+import { showApiError } from '../../utils/apiError';
 import MqttConsole from './MqttConsole';
 
 export default function MqttConsolePage() {
@@ -26,7 +27,7 @@ export default function MqttConsolePage() {
     setLoading(true);
     fetchMqttConfig(connectionId)
       .then(setConfig)
-      .catch(() => message.error('加载 MQTT 连接配置失败'))
+      .catch((error) => showApiError(error, '加载 MQTT 连接配置失败'))
       .finally(() => setLoading(false));
   }, [connectionId]);
 

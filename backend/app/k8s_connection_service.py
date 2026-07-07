@@ -252,7 +252,7 @@ def build_k8s_subscription_links(
             "enabled": enabled,
             "link_kind": "k8s",
             "cluster_id": cluster_id,
-            "webhook_secret": sub.webhook_secret,
+            "has_webhook_secret": bool(sub.webhook_secret),
         }
     ]
 

@@ -201,6 +201,21 @@ def list_api_monitor_services(
 
     name_text = (name or "").strip()
     connections = query.all()
+    # 批量预取所有相关订阅的 ApiSnapshot，避免循环内逐 subscription 查询
+    gitlab_sub_ids = [
+        conn.subscription.id
+        for conn in connections
+        if connection_is_gitlab_type(db, conn) and conn.subscription
+    ]
+    snapshot_rows = (
+        db.query(ApiSnapshot).filter(ApiSnapshot.subscription_id.in_(gitlab_sub_ids)).all()
+        if gitlab_sub_ids
+        else []
+    )
+    snapshots_by_sub: dict[int, dict[str, Any]] = {}
+    for row in snapshot_rows:
+        snapshots_by_sub.setdefault(row.subscription_id, {})[row.link_key] = row
+
     for conn in connections:
         if not connection_is_gitlab_type(db, conn):
             continue
@@ -208,9 +223,7 @@ def list_api_monitor_services(
         if not sub:
             continue
         link_enabled = sub.link_enabled or {}
-        snapshot_by_key = {}
-        rows = db.query(ApiSnapshot).filter(ApiSnapshot.subscription_id == sub.id).all()
-        snapshot_by_key = {row.link_key: row for row in rows}
+        snapshot_by_key = snapshots_by_sub.get(sub.id, {})
 
         for link_key in ["main", *[f"sub:{index}" for index in range(len(conn.sub_links or []))]]:
             if not bool(link_enabled.get(link_key)):
@@ -1091,27 +1104,39 @@ def list_api_monitor_endpoint_changes(
     return result
 
 
+_API_MONITOR_SYNC_SEMAPHORE: asyncio.Semaphore | None = None
+_API_MONITOR_SYNC_CONCURRENCY = 3
+
+
+def _get_api_monitor_sync_semaphore() -> asyncio.Semaphore:
+    global _API_MONITOR_SYNC_SEMAPHORE
+    if _API_MONITOR_SYNC_SEMAPHORE is None:
+        _API_MONITOR_SYNC_SEMAPHORE = asyncio.Semaphore(_API_MONITOR_SYNC_CONCURRENCY)
+    return _API_MONITOR_SYNC_SEMAPHORE
+
+
 async def sync_api_monitor_link_async(
     subscription_id: int,
     link_key: str,
     *,
     baseline_only: bool = False,
 ) -> None:
-    def _run() -> None:
-        db = SessionLocal()
-        try:
-            sync_api_monitor_link(
-                db,
-                subscription_id=subscription_id,
-                link_key=link_key,
-                baseline_only=baseline_only,
-            )
-        except Exception:
-            logger.exception("Async API monitor sync failed")
-        finally:
-            db.close()
+    async with _get_api_monitor_sync_semaphore():
+        def _run() -> None:
+            db = SessionLocal()
+            try:
+                sync_api_monitor_link(
+                    db,
+                    subscription_id=subscription_id,
+                    link_key=link_key,
+                    baseline_only=baseline_only,
+                )
+            except Exception:
+                logger.exception("Async API monitor sync failed")
+            finally:
+                db.close()
 
-    await asyncio.to_thread(_run)
+        await asyncio.to_thread(_run)
 
 
 def schedule_api_monitor_sync(subscription_id: int, link_key: str, *, baseline_only: bool = False) -> None:
@@ -1145,18 +1170,28 @@ async def sync_subscription_api_links(
     if not syncable:
         raise ValueError("没有配置 Clone 地址的链接，无法拉取代码")
 
-    results: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    for key in syncable:
+    subscription_id = sub.id
+
+    def _run_one(key: str) -> dict[str, Any]:
+        from app.database import SessionLocal
+
+        thread_db = SessionLocal()
         try:
-            result = await asyncio.to_thread(
-                sync_api_monitor_link,
-                db,
-                subscription_id=sub.id,
+            return sync_api_monitor_link(
+                thread_db,
+                subscription_id=subscription_id,
                 link_key=key,
                 baseline_only=False,
                 require_enabled=False,
             )
+        finally:
+            thread_db.close()
+
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for key in syncable:
+        try:
+            result = await asyncio.to_thread(_run_one, key)
             results.append(result)
         except Exception as exc:
             logger.exception("API monitor sync failed for subscription %s link %s", sub.id, key)
@@ -1229,10 +1264,18 @@ async def proxy_api_monitor_request(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("仅支持 http/https 完整地址")
 
+    from app.ssrf_guard import assert_safe_url, SsrfViolation
+
+    try:
+        assert_safe_url(target)
+    except SsrfViolation as exc:
+        raise ValueError(str(exc)) from exc
+
     request_headers = _normalize_proxy_headers(headers)
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        # 禁用 follow_redirects，避免重定向绕过 SSRF 校验
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             response = await client.request(
                 normalized_method,
                 target,

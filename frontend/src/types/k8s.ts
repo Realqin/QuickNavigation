@@ -8,6 +8,7 @@ export interface K8sClusterConfig {
   provider: K8sProvider;
   auth_type: K8sAuthType;
   username?: string | null;
+  cluster_name?: string | null;
   verify_ssl: boolean;
   password_set: boolean;
   sort_order: number;
@@ -22,6 +23,7 @@ export interface K8sClusterFormValues {
   provider: K8sProvider;
   auth_type: K8sAuthType;
   username?: string;
+  cluster_name?: string;
   password?: string;
   verify_ssl: boolean;
 }

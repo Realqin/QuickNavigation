@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
@@ -21,6 +22,27 @@ from app.prompt_template_service import get_prompt_template_for_type
 def _estimate_diff_token_budget(context_limit: int) -> int:
     limit = max(4096, int(context_limit or 128000))
     return min(60000, max(8000, int(limit * 0.45)))
+
+
+@dataclass
+class _LlmConfigView:
+    """LLM 配置的纯数据快照，便于在 Session 关闭后继续使用。"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    context_limit: int
+    stream_enabled: bool
+
+
+def _snapshot_llm_config(config: Any) -> _LlmConfigView:
+    return _LlmConfigView(
+        api_url=str(getattr(config, "api_url", "") or ""),
+        api_key=str(getattr(config, "api_key", "") or ""),
+        model_name=str(getattr(config, "model_name", "") or ""),
+        context_limit=int(getattr(config, "context_limit", 0) or 0),
+        stream_enabled=bool(getattr(config, "stream_enabled", True)),
+    )
 
 
 _ANALYSIS_SECTION_MARKERS = (
@@ -249,11 +271,24 @@ async def run_ai_analysis(db: Session, payload: dict) -> dict:
     )
 
 
-async def stream_ai_analysis_events(db: Session, payload: dict) -> AsyncIterator[dict[str, Any]]:
+async def stream_ai_analysis_events(payload: dict) -> AsyncIterator[dict[str, Any]]:
+    """流式 AI 分析事件源。
+
+    不再接收外部 Session：准备阶段用短生命周期 SessionLocal，准备完立即释放；
+    流式阶段不再持有 DB 连接，避免长时间占用连接池。
+    """
+    from app.database import SessionLocal
+
     yield {"type": "status", "message": "正在准备分析上下文…"}
 
     try:
-        prepared = await _prepare_ai_analysis(db, payload)
+        prep_db = SessionLocal()
+        try:
+            prepared = await _prepare_ai_analysis(prep_db, payload)
+            # 把 ORM LlmConfig 转成纯数据快照，防止 Session 关闭后 detached
+            prepared["llm_config"] = _snapshot_llm_config(prepared["llm_config"])
+        finally:
+            prep_db.close()
     except ValueError as exc:
         yield {"type": "error", "detail": str(exc)}
         return
@@ -266,11 +301,15 @@ async def stream_ai_analysis_events(db: Session, payload: dict) -> AsyncIterator
         try:
             from app.code_interpretation_service import run_code_interpretation
 
-            result = await run_code_interpretation(
-                db,
-                diff_text=str(prepared.get("content") or ""),
-                summary=str(prepared.get("summary") or ""),
-            )
+            ci_db = SessionLocal()
+            try:
+                result = await run_code_interpretation(
+                    ci_db,
+                    diff_text=str(prepared.get("content") or ""),
+                    summary=str(prepared.get("summary") or ""),
+                )
+            finally:
+                ci_db.close()
         except HTTPException as exc:
             yield {"type": "error", "detail": str(exc.detail)}
             return
@@ -289,7 +328,11 @@ async def stream_ai_analysis_events(db: Session, payload: dict) -> AsyncIterator
     if not llm_config.stream_enabled:
         yield {"type": "status", "message": "当前模型未启用流式，正在生成完整结果…"}
         try:
-            result = await run_ai_analysis(db, payload)
+            fallback_db = SessionLocal()
+            try:
+                result = await run_ai_analysis(fallback_db, payload)
+            finally:
+                fallback_db.close()
         except HTTPException as exc:
             yield {"type": "error", "detail": str(exc.detail)}
             return
@@ -322,7 +365,6 @@ async def stream_ai_analysis_events(db: Session, payload: dict) -> AsyncIterator
                 yield {
                     "type": "reasoning",
                     "delta": delta,
-                    "text": "".join(reasoning_parts),
                 }
             elif kind == "content":
                 delta = str(chunk.get("delta") or "")
@@ -332,7 +374,6 @@ async def stream_ai_analysis_events(db: Session, payload: dict) -> AsyncIterator
                 yield {
                     "type": "content",
                     "delta": delta,
-                    "text": "".join(content_parts),
                 }
             elif kind == "done":
                 resolved_model = str(chunk.get("model") or resolved_model)

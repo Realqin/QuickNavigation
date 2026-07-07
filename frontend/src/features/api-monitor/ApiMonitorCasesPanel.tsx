@@ -28,6 +28,7 @@ import {
   formatProxyResponseBody,
   renderCaseExecuteStatusCell,
 } from '../../utils/caseExecuteStatus';
+import { getApiErrorMessage, showApiError } from '../../utils/apiError';
 import { buildDebugUrl } from './debugUtils';
 import { distributeColumnWidths, useContainerWidth } from '../../hooks/useContainerWidth';
 
@@ -126,8 +127,8 @@ export default function ApiMonitorCasesPanel({
         page_size: 100,
       });
       setCases(result.items.filter((item) => item.status !== 'deleted'));
-    } catch {
-      appMessage.error('加载关联用例失败');
+    } catch (error) {
+      showApiError(error, '加载关联用例失败');
     } finally {
       setLoading(false);
     }
@@ -168,10 +169,7 @@ export default function ApiMonitorCasesPanel({
         }
       }
     } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (error instanceof Error ? error.message : '用例生成失败');
-      appMessage.error(String(detail));
+      showApiError(error, '用例生成失败');
     } finally {
       setGenerating(false);
     }
@@ -224,8 +222,8 @@ export default function ApiMonitorCasesPanel({
       setCases((prev) => prev.filter((item) => item.id !== id));
       appMessage.success('删除成功');
       await loadCases();
-    } catch {
-      appMessage.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   }, [appMessage, loadCases]);
 
@@ -288,9 +286,7 @@ export default function ApiMonitorCasesPanel({
         detail,
       });
     } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (error instanceof Error ? error.message : '执行失败');
+      const detail = getApiErrorMessage(error, '执行失败');
       try {
         const saved = await saveApiTestCaseExecutionResult(record.id, {
           passed: false,
@@ -322,8 +318,8 @@ export default function ApiMonitorCasesPanel({
       setModalOpen(false);
       setEditing(null);
       await loadCases();
-    } catch {
-      appMessage.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
       throw new Error('save failed');
     }
   };

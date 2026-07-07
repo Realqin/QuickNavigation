@@ -2,6 +2,7 @@ import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { Button, Modal, Spin, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { openOmnidbConsole } from '../api';
+import { showApiError } from '../utils/apiError';
 
 interface Props {
   open: boolean;
@@ -35,9 +36,9 @@ export default function OmnidbConsoleModal({
         setEmbedUrl(data.embed_url);
         setTitle(data.connection_name || connectionName || '数据库控制台');
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          message.error('打开数据库控制台失败');
+          showApiError(error, '打开数据库控制台失败');
         }
       })
       .finally(() => {

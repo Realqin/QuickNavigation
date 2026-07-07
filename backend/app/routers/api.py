@@ -259,7 +259,8 @@ def _subscription_to_out(sub: Subscription, db: Session) -> SubscriptionOut:
 
     conn = sub.connection
     out = SubscriptionOut.model_validate(sub)
-    out.webhook_url = f"/webhooks/database?secret={sub.webhook_secret}"
+    out.has_webhook_secret = bool(sub.webhook_secret)
+    out.webhook_url = "/webhooks/database"
     if conn:
         parsed = parse_repo_url(conn.url)
         out.connection_name = conn.name
@@ -926,7 +927,7 @@ def get_subscriptions(
 
 
 @router.patch("/subscriptions/{subscription_id}", response_model=GitlabSubscriptionTreeOut)
-async def patch_subscription(
+def patch_subscription(
     subscription_id: int, data: SubscriptionUpdate, db: Session = Depends(get_db)
 ):
     from app.api_monitor_service import resolve_link_target, schedule_api_monitor_sync
@@ -1015,7 +1016,7 @@ async def post_subscription_schema_scan(subscription_id: int, db: Session = Depe
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     try:
-        result = await scan_subscription_schema_async(db, sub)
+        result = await scan_subscription_schema_async(sub)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -1028,10 +1029,7 @@ async def post_subscription_schema_scan(subscription_id: int, db: Session = Depe
     else:
         message = f"检测到 {result['changes_detected']} 项结构变更，已写入活动日志"
     snapshot = result.get("snapshot")
-    if isinstance(snapshot, dict):
-        snapshot_data = snapshot.get("snapshot")
-    else:
-        snapshot_data = snapshot.snapshot if snapshot else None
+    snapshot_data = snapshot.get("snapshot") if isinstance(snapshot, dict) else None
     return SchemaScanResultOut(
         subscription_id=result["subscription_id"],
         changes_detected=result["changes_detected"],
@@ -1073,7 +1071,7 @@ def post_subscription(data: SubscriptionCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/logs", response_model=list[ActivityLogOut])
-async def get_logs(
+def get_logs(
     project: int | None = Query(None),
     environment: int | None = Query(None),
     source_type: str | None = Query(None),
@@ -1083,7 +1081,7 @@ async def get_logs(
     logs = list_activity_logs(
         db, project=project, environment=environment, source_type=source_type, limit=limit
     )
-    await backfill_missing_commit_times(db, logs)
+    backfill_missing_commit_times(db, logs)
     return logs
 
 
@@ -1481,13 +1479,13 @@ async def post_ai_analysis(payload: AiAnalysisIn, db: Session = Depends(get_db))
 
 
 @router.post("/ai-analysis/stream")
-async def post_ai_analysis_stream(payload: AiAnalysisIn, db: Session = Depends(get_db)):
+async def post_ai_analysis_stream(payload: AiAnalysisIn):
     import json
 
     from app.ai_analysis_service import stream_ai_analysis_events
 
     async def event_generator():
-        async for event in stream_ai_analysis_events(db, payload.model_dump()):
+        async for event in stream_ai_analysis_events(payload.model_dump()):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

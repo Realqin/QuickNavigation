@@ -45,6 +45,7 @@ import { getApiMonitorChangeCount, isApiMonitorChangeLog } from '../utils/apiMon
 import { getK8sAlarmAlertTypeLabel, isK8sAlarmActivityLog } from '../utils/k8sAlarmActivityLog';
 import { getSchemaChanges, isSchemaChangeLog } from '../utils/schemaChangeLog';
 import type { LogAiModalVariant } from '../utils/logAiModal';
+import { getApiErrorMessage, showApiError } from '../utils/apiError';
 
 const ENABLED_FILTER_OPTIONS = [
   { label: '已启用', value: true },
@@ -173,15 +174,11 @@ function buildTreeRows(trees: GitlabSubscriptionTree[]): SubscriptionTableRow[] 
 }
 
 function extractScanError(error: unknown, fallback: string): string {
-  const axiosError = error as AxiosError<{ detail?: string }>;
-  const detail = axiosError.response?.data?.detail;
-  if (typeof detail === 'string' && detail.trim()) {
-    return detail;
-  }
+  const axiosError = error as AxiosError;
   if (axiosError.code === 'ECONNABORTED') {
     return '巡检超时，库表较多时请稍候再试或缩小监控范围';
   }
-  return fallback;
+  return getApiErrorMessage(error, fallback);
 }
 
 function isDatabaseConnection(typeName?: string | null): boolean {
@@ -240,8 +237,8 @@ export default function LogsPage() {
         enabled: filter.enabled,
       });
       setSubs(list);
-    } catch {
-      message.error('加载订阅失败');
+    } catch (error) {
+      showApiError(error, '加载订阅失败');
     } finally {
       setLoading(false);
     }
@@ -258,8 +255,8 @@ export default function LogsPage() {
         limit: 100,
       });
       setLogs(logList);
-    } catch {
-      message.error('加载活动日志失败');
+    } catch (error) {
+      showApiError(error, '加载活动日志失败');
     } finally {
       setLogsLoading(false);
     }
@@ -421,8 +418,8 @@ export default function LogsPage() {
       const connection = await fetchConnection(connectionId);
       setEditingConnection(connection);
       setConnectionModalOpen(true);
-    } catch {
-      message.error('加载连接失败');
+    } catch (error) {
+      showApiError(error, '加载连接失败');
     }
   };
 
@@ -434,8 +431,8 @@ export default function LogsPage() {
       setConnectionModalOpen(false);
       setEditingConnection(null);
       await loadAll();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 

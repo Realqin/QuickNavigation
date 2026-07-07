@@ -14,6 +14,7 @@ import {
   formatKafkaBrokersForInput,
   normalizeKafkaBrokersInput,
 } from '../utils/kafkaBrokers';
+import { showApiError } from '../utils/apiError';
 import './ConnectionFormModal.css';
 
 interface SelectOption {
@@ -513,8 +514,8 @@ export default function ConnectionFormModal({
       } else {
         message.error(result.message);
       }
-    } catch {
-      message.error('测试连接失败');
+    } catch (error) {
+      showApiError(error, '测试连接失败');
     } finally {
       setTesting(false);
     }

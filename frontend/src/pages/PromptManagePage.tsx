@@ -27,6 +27,7 @@ import {
   RESPONSE_TYPE_PRESETS,
   getResponseTypeLabel,
 } from '../types/prompt';
+import { showApiError } from '../utils/apiError';
 
 const EMPTY_FORM: PromptTemplateFormValues = {
   prompt_type: PROMPT_TYPE_OPTIONS[0],
@@ -52,8 +53,8 @@ export default function PromptManagePage() {
     setLoading(true);
     try {
       setItems(await fetchPromptTemplates());
-    } catch {
-      message.error('加载提示词失败');
+    } catch (error) {
+      showApiError(error, '加载提示词失败');
     } finally {
       setLoading(false);
     }
@@ -116,8 +117,8 @@ export default function PromptManagePage() {
       setModalOpen(false);
       setEditing(null);
       await loadItems();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 
@@ -126,8 +127,8 @@ export default function PromptManagePage() {
       await deletePromptTemplate(item.id);
       message.success('删除成功');
       await loadItems();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   };
 
@@ -135,8 +136,8 @@ export default function PromptManagePage() {
     try {
       await togglePromptTemplate(item.id, !item.enabled);
       await loadItems();
-    } catch {
-      message.error('切换状态失败');
+    } catch (error) {
+      showApiError(error, '切换状态失败');
     }
   };
 

@@ -38,9 +38,21 @@ from app.websocket_manager import ws_manager
 logger = logging.getLogger(__name__)
 
 
+def _warn_default_webhook_secrets() -> None:
+    if settings.github_webhook_secret.strip() in ("", "change-me-github-secret"):
+        logger.warning(
+            "GITHUB_WEBHOOK_SECRET 仍为默认值，GitHub webhook 将被拒绝。请在 .env 中配置非默认密钥。"
+        )
+    if settings.gitlab_webhook_secret.strip() in ("", "change-me-gitlab-secret"):
+        logger.warning(
+            "GITLAB_WEBHOOK_SECRET 仍为默认值，GitLab webhook 将被拒绝。请在 .env 中配置非默认密钥。"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    _warn_default_webhook_secrets()
     ping_task = asyncio.create_task(connection_ping_scheduler())
     schema_task = asyncio.create_task(schema_monitor_scheduler())
     k8s_alarm_task = asyncio.create_task(k8s_alarm_scheduler())
@@ -800,6 +812,18 @@ def migrate_k8s_cluster_connection_id() -> None:
         )
 
 
+def migrate_k8s_cluster_name() -> None:
+    """Kuboard provider 需要额外存储 Kuboard 内部的集群标识（如 slimsys）。"""
+    inspector = inspect(engine)
+    if not inspector.has_table("k8s_cluster_configs"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("k8s_cluster_configs")}
+    if "cluster_name" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE k8s_cluster_configs ADD COLUMN cluster_name VARCHAR(128) NULL"))
+
+
 def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
@@ -827,6 +851,7 @@ def init_db() -> None:
     migrate_k8s_alarm_pod_restart_snapshot()
     migrate_k8s_alarm_exception_columns()
     migrate_k8s_cluster_connection_id()
+    migrate_k8s_cluster_name()
     migrate_repo_access_ssh_key()
     db = SessionLocal()
     try:

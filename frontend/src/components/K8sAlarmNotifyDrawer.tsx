@@ -11,6 +11,7 @@ import K8sServiceNameLink from './K8sServiceNameLink';
 import { useK8sClusterById } from '../hooks/useK8sClusterById';
 import type { K8sAlarmEvent } from '../types/k8s';
 import { formatDateTime } from '../utils/dateTime';
+import { showApiError } from '../utils/apiError';
 
 interface K8sAlarmNotifyDrawerProps {
   open: boolean;
@@ -18,12 +19,6 @@ interface K8sAlarmNotifyDrawerProps {
   onClose: () => void;
   onUnreadChange?: (count: number) => void;
   refreshToken?: number;
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return (
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
-  );
 }
 
 function alertTypeLabel(type: K8sAlarmEvent['alert_type']) {
@@ -86,7 +81,7 @@ export default function K8sAlarmNotifyDrawer({
       setEvents(list);
       syncUnread(list);
     } catch (error) {
-      message.error(getErrorMessage(error, '加载报警消息失败'));
+      showApiError(error, '加载报警消息失败');
     } finally {
       setLoading(false);
     }
@@ -112,7 +107,7 @@ export default function K8sAlarmNotifyDrawer({
       });
       setDetailEvent((prev) => (prev?.id === updated.id ? updated : prev));
     } catch (error) {
-      message.error(getErrorMessage(error, '标记已读失败'));
+      showApiError(error, '标记已读失败');
     }
   };
 
@@ -126,7 +121,7 @@ export default function K8sAlarmNotifyDrawer({
       await loadEvents();
       message.success('已全部标记为已读');
     } catch (error) {
-      message.error(getErrorMessage(error, '全部已读失败'));
+      showApiError(error, '全部已读失败');
     } finally {
       setMarkingAll(false);
     }

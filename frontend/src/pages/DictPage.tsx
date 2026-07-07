@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createDictItem, deleteDictItem, fetchDictItems, updateDictItem } from '../api';
 import type { DictFormValues, DictItem, DictType } from '../types';
 import { DICT_TYPE_LABELS } from '../types';
+import { showApiError } from '../utils/apiError';
 
 const DICT_TYPES: DictType[] = ['project', 'environment', 'label', 'connection_group'];
 const PAGE_SIZE = 10;
@@ -35,8 +36,8 @@ export default function DictPage() {
       const list = await fetchDictItems(activeType);
       setData(list);
       setPage(1);
-    } catch {
-      message.error('加载字典失败');
+    } catch (error) {
+      showApiError(error, '加载字典失败');
     } finally {
       setLoading(false);
     }
@@ -77,8 +78,8 @@ export default function DictPage() {
       setModalOpen(false);
       setEditing(null);
       loadData();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 
@@ -87,8 +88,8 @@ export default function DictPage() {
       await deleteDictItem(id);
       message.success('删除成功');
       loadData();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   };
 

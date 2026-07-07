@@ -68,8 +68,7 @@ import {
   updateK8sConnectionSession,
 } from '../utils/k8sConnectionSession';
 import { registerPageCleanup } from '../utils/pageCleanup';
-
-const TABLE_SCROLL_Y = 'calc(100vh - 300px)';
+import { getApiErrorMessage, showApiError } from '../utils/apiError';
 
 const WATERMARK_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
@@ -107,12 +106,6 @@ type ServiceMonitorRow =
       service: K8sService;
       pod: K8sPod;
     };
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return (
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback
-  );
-}
 
 function renderCompactTags(values: string[], empty = '-') {
   if (!values.length) {
@@ -360,7 +353,7 @@ export default function ServiceMonitorPage() {
         return null;
       });
     } catch (error) {
-      message.error(getErrorMessage(error, '加载 K8s 连接失败'));
+      showApiError(error, '加载 K8s 连接失败');
     } finally {
       setClustersLoading(false);
     }
@@ -385,7 +378,7 @@ export default function ServiceMonitorPage() {
         });
       } catch (error) {
         setServices([]);
-        message.error(getErrorMessage(error, '加载服务状态失败'));
+        showApiError(error, '加载服务状态失败');
       } finally {
         setServicesLoading(false);
       }
@@ -420,7 +413,7 @@ export default function ServiceMonitorPage() {
         setProjects([]);
         setSelectedProject(undefined);
         setServices([]);
-        message.error(getErrorMessage(error, '加载项目列表失败'));
+        showApiError(error, '加载项目列表失败');
       } finally {
         setProjectLoading(false);
       }
@@ -521,7 +514,7 @@ export default function ServiceMonitorPage() {
       message.success(`${selectedCluster.name} 连接成功`);
     } catch (error) {
       clearRuntimeData();
-      message.error(getErrorMessage(error, '连接 K8s 集群失败'));
+      showApiError(error, '连接 K8s 集群失败');
     } finally {
       setConnecting(false);
     }
@@ -584,7 +577,7 @@ export default function ServiceMonitorPage() {
       message.success(result.message);
       await loadServices(connectedId, service.namespace);
     } catch (error) {
-      message.error(getErrorMessage(error, '调整副本数失败'));
+      showApiError(error, '调整副本数失败');
     } finally {
       setOperationKeys((prev) => prev.filter((item) => item !== key));
     }
@@ -624,7 +617,7 @@ export default function ServiceMonitorPage() {
         });
         setWatermarkData(result);
       } catch (error) {
-        setWatermarkError(getErrorMessage(error, '加载 Watermark 数据失败'));
+        setWatermarkError(getApiErrorMessage(error, '加载 Watermark 数据失败'));
       } finally {
         setWatermarkLoading(false);
       }
@@ -1167,18 +1160,20 @@ export default function ServiceMonitorPage() {
               </Space>
             </div>
 
-            <Table<ServiceMonitorRow>
-              rowKey="rowKey"
-              className="service-monitor-page__table"
-              dataSource={tableRows}
-              columns={serviceColumns}
-              loading={servicesLoading}
-              pagination={false}
-              scroll={{ x: 1740, y: TABLE_SCROLL_Y }}
-              rowClassName={(row) =>
-                row.kind === 'pod' ? 'service-monitor-page__row--pod' : ''
-              }
-            />
+            <div className="service-monitor-page__table-wrap">
+              <Table<ServiceMonitorRow>
+                rowKey="rowKey"
+                className="service-monitor-page__table"
+                dataSource={tableRows}
+                columns={serviceColumns}
+                loading={servicesLoading}
+                pagination={false}
+                scroll={{ x: 1740 }}
+                rowClassName={(row) =>
+                  row.kind === 'pod' ? 'service-monitor-page__row--pod' : ''
+                }
+              />
+            </div>
             <div className="service-monitor-page__pagination">
               <Pagination
                 current={page}

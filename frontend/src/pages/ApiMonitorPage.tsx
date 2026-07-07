@@ -37,6 +37,7 @@ import ApiMonitorDebugPanel from '../features/api-monitor/ApiMonitorDebugPanel';
 import ApiMonitorDocPanel from '../features/api-monitor/ApiMonitorDocPanel';
 import { readApiMonitorEnvPreset } from '../features/api-monitor/apiMonitorEnvPreset';
 import { useDictGroup } from '../hooks/useDict';
+import { getApiErrorMessage, showApiError } from '../utils/apiError';
 
 const METHOD_COLORS: Record<string, string> = {
   GET: '#49cc90',
@@ -251,10 +252,7 @@ export default function ApiMonitorPage() {
         setSelectedEndpoint(detail);
       } catch (error) {
         setSelectedEndpoint(null);
-        const detail =
-          (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          '加载接口详情失败';
-        message.warning(detail);
+        message.warning(getApiErrorMessage(error, '加载接口详情失败'));
       } finally {
         setEndpointLoading(false);
       }
@@ -312,10 +310,9 @@ export default function ApiMonitorPage() {
         setRemovedEndpointKeys([]);
         setExpandedKeys([]);
         setSelectedEndpoint(null);
-        const detail =
-          (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          '接口文档尚未生成，请先在日志订阅中启用并获取代码';
-        message.warning(detail);
+        message.warning(
+          getApiErrorMessage(error, '接口文档尚未生成，请先在日志订阅中启用并获取代码'),
+        );
       } finally {
         setGroupsLoading(false);
       }
@@ -340,10 +337,7 @@ export default function ApiMonitorPage() {
       } catch (error) {
         setModules([]);
         setSelectedModule(null);
-        const detail =
-          (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          '加载服务列表失败';
-        message.warning(detail);
+        message.warning(getApiErrorMessage(error, '加载服务列表失败'));
         return null;
       } finally {
         setModulesLoading(false);
@@ -365,8 +359,8 @@ export default function ApiMonitorPage() {
           name: resolved.serviceId,
         });
         return resolved.serviceId;
-      } catch {
-        message.error('加载筛选项失败');
+      } catch (error) {
+        showApiError(error, '加载筛选项失败');
         setFilterOptions(EMPTY_FILTER_OPTIONS);
         return undefined;
       } finally {

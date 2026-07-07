@@ -2,6 +2,7 @@ import { App, Spin, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { fetchOmnidbMenuUrl } from '../../api';
 import { resolveServiceBaseUrl } from '../../utils/serviceUrl';
+import { showApiError } from '../../utils/apiError';
 
 const DEFAULT_OMNIDB_PORT = 8081;
 
@@ -20,9 +21,9 @@ export default function OmnidbMethodPage() {
           setSrc(resolveServiceBaseUrl(data.url, DEFAULT_OMNIDB_PORT));
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          message.error('加载数据库控制台失败');
+          showApiError(error, '加载数据库控制台失败');
         }
       })
       .finally(() => {

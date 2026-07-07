@@ -2,6 +2,7 @@ import { Alert, Form, Input, Modal, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { fetchRepoAccessSettings, updateRepoAccessSettings } from '../api';
 import type { RepoAccessSettings } from '../types';
+import { showApiError } from '../utils/apiError';
 
 interface Props {
   open: boolean;
@@ -36,7 +37,7 @@ export default function RepoAccessSettingsModal({ open, onClose, onSaved }: Prop
           github_token: undefined,
         });
       })
-      .catch(() => message.error('加载配置失败'))
+      .catch((error) => showApiError(error, '加载配置失败'))
       .finally(() => setLoading(false));
   }, [open, form]);
 
@@ -61,8 +62,8 @@ export default function RepoAccessSettingsModal({ open, onClose, onSaved }: Prop
       message.success('配置已保存');
       onSaved?.();
       onClose();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     } finally {
       setSaving(false);
     }

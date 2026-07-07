@@ -109,7 +109,7 @@ export interface GitlabSubscriptionLink {
   enabled: boolean;
   link_kind?: 'gitlab' | 'database' | 'k8s';
   cluster_id?: number | null;
-  webhook_secret?: string | null;
+  has_webhook_secret?: boolean;
   last_updated_at?: string | null;
   api_scan_status?: string | null;
   api_endpoint_count?: number;
@@ -145,7 +145,7 @@ export interface Subscription {
   github_events?: string[] | null;
   db_filter?: Record<string, unknown> | null;
   notify_homepage: boolean;
-  webhook_secret: string;
+  has_webhook_secret: boolean;
   webhook_url?: string | null;
   connection_name?: string | null;
   connection_url?: string | null;

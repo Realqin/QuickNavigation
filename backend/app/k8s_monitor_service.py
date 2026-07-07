@@ -1,5 +1,6 @@
 import math
 import time
+import json
 import base64
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,8 @@ FLINK_WATERMARK_DELAY_MS = 2 * 60 * 60 * 1000
 MAX_WATERMARK_TIMESTAMP_MS = 253402300799999
 KUBESPHERE_TOKEN_TTL_SECONDS = 10 * 60
 _KUBESPHERE_AUTH_CACHE: dict[int, tuple[dict[str, str], float]] = {}
+KUBOARD_TOKEN_TTL_SECONDS = 10 * 60
+_KUBOARD_AUTH_CACHE: dict[int, tuple[dict[str, str], float]] = {}
 
 
 class K8sClusterHttpSession:
@@ -180,6 +183,7 @@ def cluster_to_out_dict(cluster: K8sClusterConfig) -> dict[str, Any]:
         "provider": cluster.provider or "native",
         "auth_type": cluster.auth_type or "password",
         "username": cluster.username,
+        "cluster_name": cluster.cluster_name,
         "verify_ssl": bool(cluster.verify_ssl),
         "password_set": bool(cluster.password),
         "sort_order": cluster.sort_order,
@@ -215,6 +219,7 @@ def create_k8s_cluster(db: Session, data: K8sClusterConfigCreate) -> dict[str, A
         provider=_normalize_provider(payload.get("provider")),
         auth_type=_normalize_auth_type(payload.get("auth_type")),
         username=str(payload.get("username") or "").strip() or None,
+        cluster_name=str(payload.get("cluster_name") or "").strip() or None,
         password=password,
         verify_ssl=bool(payload.get("verify_ssl")),
         sort_order=max_order + 1,
@@ -247,6 +252,9 @@ def update_k8s_cluster(
         if key == "username":
             setattr(cluster, key, str(value or "").strip() or None)
             continue
+        if key == "cluster_name":
+            setattr(cluster, key, str(value or "").strip() or None)
+            continue
         if key == "name" and value is not None:
             setattr(cluster, key, str(value).strip())
             continue
@@ -259,12 +267,28 @@ def update_k8s_cluster(
 
 def delete_k8s_cluster(db: Session, cluster: K8sClusterConfig) -> None:
     _KUBESPHERE_AUTH_CACHE.pop(cluster.id, None)
+    _KUBOARD_AUTH_CACHE.pop(cluster.id, None)
     db.delete(cluster)
     db.commit()
 
 
 def _uses_kubesphere_password_auth(cluster: K8sClusterConfig) -> bool:
     return (cluster.provider or "native") == "kubesphere" and (cluster.auth_type or "password") == "password"
+
+
+def _uses_kuboard_password_auth(cluster: K8sClusterConfig) -> bool:
+    return (cluster.provider or "native") == "kuboard" and (cluster.auth_type or "password") == "password"
+
+
+def _kuboard_path_prefix(cluster: K8sClusterConfig) -> str:
+    """Kuboard 将原生 K8s API 代理在 /k8s-api/{clusterName} 下。"""
+    cluster_name = str(cluster.cluster_name or "").strip()
+    if not cluster_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Kuboard 集群未配置 cluster_name（Kuboard 内部集群标识，如 slimsys）",
+        )
+    return f"/k8s-api/{cluster_name}"
 
 
 def _response_error_detail(response: httpx.Response) -> str:
@@ -307,6 +331,8 @@ def _request(
     extra_headers: dict[str, str] | None = None,
     force_kubesphere_login: bool = False,
     retry_kubesphere_login: bool = True,
+    force_kuboard_login: bool = False,
+    retry_kuboard_login: bool = True,
     http_client: httpx.Client | None = None,
 ) -> httpx.Response:
     headers = {"Accept": "application/json"}
@@ -315,8 +341,11 @@ def _request(
 
     auth: httpx.BasicAuth | None = None
     use_kubesphere_password_auth = _uses_kubesphere_password_auth(cluster)
+    use_kuboard_password_auth = _uses_kuboard_password_auth(cluster)
     if use_kubesphere_password_auth:
         headers.update(_get_kubesphere_auth_headers(cluster, force_refresh=force_kubesphere_login))
+    elif use_kuboard_password_auth:
+        headers.update(_get_kuboard_auth_headers(cluster, force_refresh=force_kuboard_login))
     elif (cluster.auth_type or "password") == "token":
         token = str(cluster.password or "").strip()
         if not token:
@@ -329,7 +358,11 @@ def _request(
             raise HTTPException(status_code=400, detail="账号或密码未配置")
         auth = httpx.BasicAuth(username, password)
 
-    url = f"{cluster.api_server.rstrip('/')}{path}"
+    # Kuboard 将原生 K8s API 代理在 /k8s-api/{clusterName} 下
+    effective_path = path
+    if use_kuboard_password_auth:
+        effective_path = f"{_kuboard_path_prefix(cluster)}{path}"
+    url = f"{cluster.api_server.rstrip('/')}{effective_path}"
 
     def _send_request(client: httpx.Client) -> httpx.Response:
         return client.request(
@@ -383,6 +416,7 @@ def _request(
         return response
     if 300 <= response.status_code < 400:
         location = response.headers.get("location") or ""
+        response.close()
         raise HTTPException(
             status_code=502,
             detail=f"Kubernetes API 被重定向到 {location or '其他页面'}，请确认认证方式和 API 地址",
@@ -394,6 +428,7 @@ def _request(
         and retry_kubesphere_login
         and _is_kubesphere_auth_cache_error(response, detail)
     ):
+        response.close()
         _KUBESPHERE_AUTH_CACHE.pop(cluster.id, None)
         return _request(
             cluster,
@@ -404,10 +439,33 @@ def _request(
             extra_headers=extra_headers,
             force_kubesphere_login=True,
             retry_kubesphere_login=False,
+            force_kuboard_login=False,
+            retry_kuboard_login=False,
+            http_client=http_client,
+        )
+    if (
+        use_kuboard_password_auth
+        and retry_kuboard_login
+        and response.status_code in {401, 403}
+    ):
+        response.close()
+        _KUBOARD_AUTH_CACHE.pop(cluster.id, None)
+        return _request(
+            cluster,
+            method,
+            path,
+            params=params,
+            json_body=json_body,
+            extra_headers=extra_headers,
+            force_kubesphere_login=False,
+            retry_kubesphere_login=False,
+            force_kuboard_login=True,
+            retry_kuboard_login=False,
             http_client=http_client,
         )
     if response.status_code in {401, 403}:
         detail = detail or "认证失败或权限不足"
+    response.close()
     raise HTTPException(status_code=response.status_code, detail=detail or "Kubernetes API 返回错误")
 
 
@@ -562,6 +620,148 @@ def _get_kubesphere_auth_headers(
     _KUBESPHERE_AUTH_CACHE[cluster.id] = (
         auth_headers,
         time.time() + KUBESPHERE_TOKEN_TTL_SECONDS,
+    )
+    return auth_headers
+
+
+def _kuboard_sso_login(cluster: K8sClusterConfig) -> dict[str, str]:
+    """走完 Kuboard Dex SSO 6 步重定向，返回 {Cookie: KuboardToken=...; KuboardLogin=true}。"""
+    username = str(cluster.username or "").strip()
+    password = str(cluster.password or "").strip()
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Kuboard 账号或密码未配置")
+
+    base = cluster.api_server.rstrip("/")
+    verify_ssl = bool(cluster.verify_ssl)
+    sso_params = (
+        "state=%2F&access_type=offline&client_id=kuboard-sso"
+        "&redirect_uri=%2Fcallback&response_type=code"
+        "&scope=openid+profile+email+groups&connector_id=default"
+    )
+    errors: list[str] = []
+    with httpx.Client(
+        timeout=K8S_TIMEOUT, verify=verify_ssl, follow_redirects=False
+    ) as client:
+        try:
+            r1 = client.get(f"{base}/sso/auth?{sso_params}")
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Kuboard SSO 入口请求失败：{exc}"
+            ) from exc
+        if r1.status_code != 302:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Kuboard SSO 入口未重定向：{_response_preview(r1, 200)}",
+            )
+        loc1 = r1.headers.get("location", "")
+        if not loc1:
+            raise HTTPException(status_code=502, detail="Kuboard SSO 入口未返回 location")
+
+        try:
+            client.get(f"{base}{loc1}")
+        except httpx.HTTPError as exc:
+            errors.append(f"登录页请求失败：{exc}")
+
+        # 验证密码（Kuboard 前端在提交隐藏表单前先调 /login/password）
+        try:
+            verify_resp = client.post(
+                f"{base}/login/password",
+                json={"username": username, "password": password},
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Kuboard 登录请求失败：{exc}"
+            ) from exc
+        if verify_resp.status_code != 200:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Kuboard 登录失败：{_response_error_detail(verify_resp)}",
+            )
+        try:
+            verify_payload = verify_resp.json()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=502, detail="Kuboard /login/password 未返回 JSON"
+            ) from exc
+        if str(verify_payload.get("status") or "") != "success":
+            message = (
+                verify_payload.get("message")
+                or verify_payload.get("reason")
+                or "登录失败"
+            )
+            raise HTTPException(status_code=401, detail=f"Kuboard 登录失败：{message}")
+
+        # 提交隐藏表单到 /sso/auth/default?req=xxx
+        # password 字段值是 JSON 字符串 {"password":"...","passcode":""}
+        pwd_payload = json.dumps({"password": password, "passcode": ""})
+        try:
+            r4 = client.post(
+                f"{base}{loc1}",
+                data={"login": username, "password": pwd_payload},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Kuboard SSO 提交失败：{exc}"
+            ) from exc
+        loc4 = r4.headers.get("location", "")
+        if r4.status_code not in (302, 303) or not loc4:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Kuboard SSO 提交未重定向：{_response_error_detail(r4)}",
+            )
+
+        # 跟随 approval -> callback -> /
+        try:
+            r5 = client.get(f"{base}{loc4}")
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Kuboard SSO 回调请求失败：{exc}"
+            ) from exc
+        loc5 = r5.headers.get("location", "")
+        if r5.status_code not in (302, 303) or not loc5:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Kuboard SSO approval 未返回 callback：{_response_preview(r5, 200)}",
+            )
+        try:
+            client.get(f"{base}{loc5}")
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Kuboard SSO callback 跳转失败：{exc}"
+            ) from exc
+
+        token = client.cookies.get("KuboardToken")
+        if not token:
+            raise HTTPException(
+                status_code=502,
+                detail="Kuboard 登录成功但未返回 KuboardToken cookie",
+            )
+
+    return {"Cookie": f"KuboardToken={token}; KuboardLogin=true"}
+
+
+def _get_kuboard_auth_headers(
+    cluster: K8sClusterConfig,
+    *,
+    force_refresh: bool = False,
+) -> dict[str, str]:
+    now = time.time()
+    if force_refresh:
+        _KUBOARD_AUTH_CACHE.pop(cluster.id, None)
+    else:
+        cached = _KUBOARD_AUTH_CACHE.get(cluster.id)
+        if cached and cached[1] > now:
+            return cached[0]
+
+    auth_headers = _kuboard_sso_login(cluster)
+    _KUBOARD_AUTH_CACHE[cluster.id] = (
+        auth_headers,
+        time.time() + KUBOARD_TOKEN_TTL_SECONDS,
     )
     return auth_headers
 
@@ -1247,6 +1447,7 @@ def _get_flink_json(
 
     if not 200 <= response.status_code < 300:
         preview = _response_preview(response, 300)
+        response.close()
         raise HTTPException(
             status_code=502,
             detail=f"Flink REST 返回 {response.status_code}：{preview or response.reason_phrase}",
@@ -1255,6 +1456,7 @@ def _get_flink_json(
         payload = response.json()
     except ValueError as exc:
         preview = _response_preview(response, 300)
+        response.close()
         raise HTTPException(
             status_code=502,
             detail=f"Flink REST 未返回 JSON：{path}；响应预览：{preview or '-'}",

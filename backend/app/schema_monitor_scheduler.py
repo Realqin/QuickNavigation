@@ -20,7 +20,7 @@ async def schema_monitor_scheduler() -> None:
                     logger.debug("Schema monitor: no enabled targets")
                 for sub in targets:
                     try:
-                        result = await scan_subscription_schema_async(db, sub)
+                        result = await scan_subscription_schema_async(sub)
                         if result["changes_detected"]:
                             logger.info(
                                 "Schema monitor: subscription=%s changes=%s logs=%s",

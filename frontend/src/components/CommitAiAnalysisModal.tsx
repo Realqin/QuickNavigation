@@ -115,11 +115,11 @@ export default function CommitAiAnalysisModal({
             onStatus: (message) => {
               setStatusMessage(message);
             },
-            onReasoning: (text) => {
-              setReasoningText(text);
+            onReasoning: (delta) => {
+              setReasoningText((prev) => prev + delta);
             },
-            onContent: (text) => {
-              setContentPreview(text);
+            onContent: (delta) => {
+              setContentPreview((prev) => prev + delta);
             },
             onDone: (data) => {
               setResult({

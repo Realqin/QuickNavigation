@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { testKafkaConsoleConnection } from '../api';
 import type { KafkaConsoleConnection, KafkaConsoleConnectionFormValues } from '../types';
 import { normalizeKafkaBrokersInput } from '../utils/kafkaBrokers';
+import { showApiError } from '../utils/apiError';
 import './ConnectionFormModal.css';
 
 interface Props {
@@ -78,8 +79,8 @@ export default function KafkaConsoleConnectionModal({
       } else {
         message.error(result.message);
       }
-    } catch {
-      message.error('测试连接失败');
+    } catch (error) {
+      showApiError(error, '测试连接失败');
     } finally {
       setTesting(false);
     }

@@ -35,6 +35,7 @@ import ConnectionFormModal from '../components/ConnectionFormModal';
 import { useDictGroup } from '../hooks/useDict';
 import type { Connection, ConnectionFormValues, SubLink } from '../types';
 import { formatConnectionEndpoint, getConnectionOpenUrl } from '../utils/connectionType';
+import { showApiError } from '../utils/apiError';
 
 interface FilterValues {
   name?: string;
@@ -165,9 +166,9 @@ export default function ConnectionsPage() {
         });
         return next;
       });
-    } catch {
+    } catch (error) {
       if (!silent) {
-        message.error('加载失败');
+        showApiError(error, '加载失败');
       }
     } finally {
       if (!silent) {
@@ -241,8 +242,8 @@ export default function ConnectionsPage() {
       setModalOpen(false);
       setEditing(null);
       loadData();
-    } catch {
-      message.error('保存失败');
+    } catch (error) {
+      showApiError(error, '保存失败');
     }
   };
 
@@ -251,8 +252,8 @@ export default function ConnectionsPage() {
       await deleteConnection(id);
       message.success('删除成功');
       loadData();
-    } catch {
-      message.error('删除失败');
+    } catch (error) {
+      showApiError(error, '删除失败');
     }
   };
 
@@ -263,8 +264,8 @@ export default function ConnectionsPage() {
       message.success(`已删除 ${selectedRowKeys.length} 条连接`);
       setSelectedRowKeys([]);
       loadData();
-    } catch {
-      message.error('批量删除失败');
+    } catch (error) {
+      showApiError(error, '批量删除失败');
     }
   };
 
@@ -282,8 +283,8 @@ export default function ConnectionsPage() {
           ? result.is_reachable
           : result.sub_links?.[subIndex]?.is_reachable;
       message.success(reachable ? '连接正常' : '无法连通');
-    } catch {
-      message.error('测试连接失败');
+    } catch (error) {
+      showApiError(error, '测试连接失败');
     } finally {
       setPingingKeys((prev) => prev.filter((key) => key !== pingKey));
     }

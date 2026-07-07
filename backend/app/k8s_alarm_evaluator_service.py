@@ -840,60 +840,75 @@ def _evaluate_single_target(
     return pending_broadcasts
 
 
-def run_k8s_alarm_evaluation(db: Session) -> list[tuple[K8sAlarmEvent, str]]:
-    targets = _list_monitor_targets(db)
-    broadcasts: list[tuple[K8sAlarmEvent, str]] = []
-    targets_by_cluster: dict[int, list[dict[str, Any]]] = {}
-    for target in targets:
-        targets_by_cluster.setdefault(target["cluster"].id, []).append(target)
+def run_k8s_alarm_evaluation() -> list[tuple[int, str]]:
+    """同步执行一轮 K8s 告警评估。
 
-    processed = 0
-    for cluster_targets in targets_by_cluster.values():
-        cluster: K8sClusterConfig = cluster_targets[0]["cluster"]
-        with K8sClusterHttpSession(cluster) as session, FlinkHttpClientPool(cluster) as flink_pool:
-            for target in cluster_targets:
-                try:
-                    broadcasts.extend(
-                        _evaluate_single_target(
-                            db,
-                            target,
-                            http_client=session.client,
-                            flink_pool=flink_pool,
+    内部自建独立 Session，避免跨 asyncio.to_thread 传递 Session 导致连接池异常。
+    返回 (event_id, cluster_name) 列表，调用方在 async 上下文用主 Session 重新加载 ORM 后广播。
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    broadcasts: list[tuple[K8sAlarmEvent, str]] = []
+    try:
+        targets = _list_monitor_targets(db)
+        targets_by_cluster: dict[int, list[dict[str, Any]]] = {}
+        for target in targets:
+            targets_by_cluster.setdefault(target["cluster"].id, []).append(target)
+
+        processed = 0
+        for cluster_targets in targets_by_cluster.values():
+            cluster: K8sClusterConfig = cluster_targets[0]["cluster"]
+            with K8sClusterHttpSession(cluster) as session, FlinkHttpClientPool(cluster) as flink_pool:
+                for target in cluster_targets:
+                    try:
+                        broadcasts.extend(
+                            _evaluate_single_target(
+                                db,
+                                target,
+                                http_client=session.client,
+                                flink_pool=flink_pool,
+                            )
                         )
-                    )
-                except HTTPException as exc:
-                    if _is_buffer_exhausted_detail(exc.detail):
-                        logger.error(
-                            "Network buffer exhausted, aborting k8s alarm evaluation: %s",
+                    except HTTPException as exc:
+                        if _is_buffer_exhausted_detail(exc.detail):
+                            logger.error(
+                                "Network buffer exhausted, aborting k8s alarm evaluation: %s",
+                                exc.detail,
+                            )
+                            return [(event.id, cluster_name) for event, cluster_name in broadcasts]
+                        logger.warning(
+                            "Alarm check skipped cluster=%s namespace=%s service=%s: %s",
+                            target["cluster"].id,
+                            target["namespace"],
+                            target["service_name"],
                             exc.detail,
                         )
-                        return broadcasts
-                    logger.warning(
-                        "Alarm check skipped cluster=%s namespace=%s service=%s: %s",
-                        target["cluster"].id,
-                        target["namespace"],
-                        target["service_name"],
-                        exc.detail,
-                    )
-                    db.rollback()
-                except Exception:
-                    logger.exception(
-                        "Alarm check failed cluster=%s namespace=%s service=%s",
-                        target["cluster"].id,
-                        target["namespace"],
-                        target["service_name"],
-                    )
-                    db.rollback()
-                processed += 1
-                if processed < len(targets):
-                    time.sleep(TARGET_CHECK_INTERVAL_SECONDS)
-    return broadcasts
+                        db.rollback()
+                    except Exception:
+                        logger.exception(
+                            "Alarm check failed cluster=%s namespace=%s service=%s",
+                            target["cluster"].id,
+                            target["namespace"],
+                            target["service_name"],
+                        )
+                        db.rollback()
+                    processed += 1
+                    if processed < len(targets):
+                        time.sleep(TARGET_CHECK_INTERVAL_SECONDS)
+        return [(event.id, cluster_name) for event, cluster_name in broadcasts]
+    finally:
+        db.close()
 
 
 async def evaluate_k8s_alarms_async(db: Session) -> None:
-    broadcasts = await asyncio.to_thread(run_k8s_alarm_evaluation, db)
-    for event, cluster_name in broadcasts:
+    """告警评估入口。db 由调度器主线程持有，仅用于广播阶段（同线程）。"""
+    broadcasts = await asyncio.to_thread(run_k8s_alarm_evaluation)
+    for event_id, cluster_name in broadcasts:
         try:
+            event = db.get(K8sAlarmEvent, event_id)
+            if not event:
+                continue
             await _broadcast_alarm(db, event, cluster_name)
         except Exception:
-            logger.exception("Broadcast k8s alarm failed event=%s", event.id)
+            logger.exception("Broadcast k8s alarm failed event=%s", event_id)
