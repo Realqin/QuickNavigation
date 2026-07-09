@@ -1,9 +1,11 @@
-import { buildEmbedSessionPageUrl } from './embedSession';
-
 const DEFAULT_REDISINSIGHT_PORT = 5540;
 
-export function resolveRedisinsightOpenUrl(embedUrl: string, port = DEFAULT_REDISINSIGHT_PORT): string {
-  const target = new URL(embedUrl);
+/** RedisInsight 直连 5540（子路径代理下易跳回 8080 首页）。 */
+export function resolveRedisinsightOpenUrl(
+  embedUrl: string,
+  port = DEFAULT_REDISINSIGHT_PORT,
+): string {
+  const target = new URL(embedUrl, window.location.origin);
   target.protocol = window.location.protocol;
   target.hostname = window.location.hostname;
   target.port = String(port);
@@ -18,9 +20,7 @@ export async function openRedisinsightInNewTab(
   connectionId: number,
 ): Promise<void> {
   const data = await openConsole(connectionId, window.location.hostname);
-  const url = data.session_id
-    ? buildEmbedSessionPageUrl(data.session_id)
-    : resolveRedisinsightOpenUrl(data.embed_url);
+  const url = resolveRedisinsightOpenUrl(data.embed_url);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
     throw new Error('browser blocked popup');

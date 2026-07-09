@@ -83,6 +83,33 @@
 
 .connection-form-modal__gitlab-sub-section {
   margin-bottom: 8px;
+  overflow-x: hidden;
+}
+
+.connection-form-modal__subscription-item {
+  margin-bottom: 16px;
+}
+
+.connection-form-modal__subscription-item .ant-form-item-row {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.connection-form-modal__subscription-item .ant-form-item-label {
+  flex: 0 0 84px;
+  max-width: 84px;
+}
+
+.connection-form-modal__subscription-item .ant-form-item-label > label {
+  height: auto;
+}
+
+.connection-form-modal__subscription-item .ant-form-item-control {
+  flex: 0 0 auto;
+}
+
+.connection-form-modal__subscription-item .ant-form-item-control-input {
+  min-height: auto;
 }
 
 .connection-form-modal__gitlab-sub-header,

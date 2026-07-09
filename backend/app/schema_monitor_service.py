@@ -275,8 +275,10 @@ def _build_monitor_dsn(config: dict[str, Any]) -> str:
 
 
 def _is_subscription_link_enabled(sub: Subscription) -> bool:
+    if not sub.enabled:
+        return False
     states = sub.link_enabled or {}
-    return bool(states.get("main", sub.enabled))
+    return bool(states.get("main", False))
 
 
 def _subscription_monitor_enabled(sub: Subscription) -> bool:

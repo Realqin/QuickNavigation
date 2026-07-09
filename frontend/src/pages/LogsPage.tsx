@@ -24,6 +24,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   fetchConnection,
+  createLogsWebSocket,
   fetchLogs,
   fetchPublicConfig,
   fetchSubscriptions,
@@ -37,6 +38,7 @@ import ConnectionFormModal from '../components/ConnectionFormModal';
 import K8sAlarmMonitorPanel from '../components/K8sAlarmMonitorPanel';
 import RepoAccessSettingsModal from '../components/RepoAccessSettingsModal';
 import { useDictGroup } from '../hooks/useDict';
+import { useTabWorkspaceFilter } from '../hooks/useTabWorkspaceFilter';
 import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
 import type { ActivityLog, Connection, ConnectionFormValues, GitlabSubscriptionTree } from '../types';
 import { extractCommitSha } from '../utils/activityLogDetail';
@@ -195,6 +197,7 @@ function isK8sConnection(typeName?: string | null): boolean {
 
 export default function LogsPage() {
   const { projects, environments, labels, connectionGroups } = useDictGroup();
+  const { project, environment, setWorkspace, globalVersion } = useTabWorkspaceFilter('logs');
   const { openActivityLogDetail, detailModals } = useActivityLogDetail();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [subs, setSubs] = useState<GitlabSubscriptionTree[]>([]);
@@ -213,6 +216,7 @@ export default function LogsPage() {
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [alarmMonitorOpen, setAlarmMonitorOpen] = useState(false);
   const [alarmClusterId, setAlarmClusterId] = useState<number | null>(null);
+  const [alarmConnectionId, setAlarmConnectionId] = useState<number | null>(null);
   const [scanningSubIds, setScanningSubIds] = useState<number[]>([]);
   const [syncingApiSubIds, setSyncingApiSubIds] = useState<number[]>([]);
 
@@ -267,9 +271,27 @@ export default function LogsPage() {
   }, [loadLogs, loadSubscriptions]);
 
   useEffect(() => {
-    loadAll();
+    logForm.setFieldsValue({
+      project: project ?? undefined,
+      environment: environment ?? undefined,
+    });
+    subForm.setFieldsValue({
+      project: project ?? undefined,
+    });
+    void loadAll();
+  }, [project, environment, globalVersion]);
+
+  useEffect(() => {
+    if (project == null || environment == null) return;
+    const handle = createLogsWebSocket((log) => {
+      setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, 100));
+    }, { project, environment });
+    return () => handle.close();
+  }, [project, environment, globalVersion]);
+
+  useEffect(() => {
     resolveWebhookBase();
-  }, [loadAll, resolveWebhookBase]);
+  }, [resolveWebhookBase]);
 
   const buildWebhookUrl = (path: string) => `${webhookBase.replace(/\/$/, '')}${path}`;
 
@@ -387,11 +409,17 @@ export default function LogsPage() {
     );
   };
 
-  const handleSubFilterChange = () => {
+  const handleSubFilterChange = (_changed: Partial<Record<string, unknown>>, allValues: Record<string, unknown>) => {
+    if ('project' in _changed) {
+      setWorkspace(allValues.project as number | undefined, environment);
+    }
     loadSubscriptions().catch(() => undefined);
   };
 
-  const handleLogFilterChange = () => {
+  const handleLogFilterChange = (_changed: Partial<Record<string, unknown>>, allValues: Record<string, unknown>) => {
+    if ('project' in _changed || 'environment' in _changed) {
+      setWorkspace(allValues.project as number | undefined, allValues.environment as number | undefined);
+    }
     loadLogs().catch(() => undefined);
   };
 
@@ -716,6 +744,7 @@ export default function LogsPage() {
                       style={{ paddingInline: 0 }}
                       disabled={!record.cluster_id}
                       onClick={() => {
+                        setAlarmConnectionId(record.connection_id);
                         setAlarmClusterId(record.cluster_id ?? null);
                         setAlarmMonitorOpen(true);
                       }}
@@ -862,9 +891,11 @@ export default function LogsPage() {
       <K8sAlarmMonitorPanel
         open={alarmMonitorOpen}
         clusterId={alarmClusterId}
+        connectionId={alarmConnectionId}
         onClose={() => {
           setAlarmMonitorOpen(false);
           setAlarmClusterId(null);
+          setAlarmConnectionId(null);
         }}
       />
       {detailModals}

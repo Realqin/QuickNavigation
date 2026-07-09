@@ -1,0 +1,59 @@
+# 生产服务器覆盖配置（192.168.6.189 等 ARM 部署）
+# 用法：docker-compose -f docker-compose.yml -f docker-compose.offline.yml -f docker-compose.prod.yml up -d
+
+x-tz-env: &tz_env
+  TZ: Asia/Shanghai
+
+services:
+  mysql:
+    environment:
+      <<: *tz_env
+  omnidb-app:
+    environment:
+      <<: *tz_env
+  omnidb:
+    environment:
+      <<: *tz_env
+  sshwifty-app:
+    environment:
+      <<: *tz_env
+  sshwifty:
+    environment:
+      <<: *tz_env
+      SSHWIFTY_TLS_CN: 192.168.6.189
+      SSHWIFTY_TLS_SAN: DNS:localhost,IP:127.0.0.1,IP:192.168.6.189
+  kafka-ui:
+    build: ./docker/kafka-ui
+    container_name: quicknav-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    volumes:
+      - ${KAFKA_CONFIG_HOST_DIR:-./docker/kafka-ui/data}:/config
+    environment:
+      <<: *tz_env
+      KAFKA_UI_CONFIG_PATH: /config/application.yml
+      SERVER_SERVLET_CONTEXT_PATH: /proxy/kafka
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  redisinsight-app:
+    environment:
+      <<: *tz_env
+  redisinsight:
+    environment:
+      <<: *tz_env
+  backend:
+    environment:
+      <<: *tz_env
+      PUBLIC_WEBHOOK_BASE_URL: http://192.168.6.189:8080
+      KAFKA_CONSOLE_PROVIDER: kafka-ui
+      KAFKA_CONFIG_HOST_DIR: ./docker/kafka-ui/data
+      REDPANDA_CONFIG_PATH: /config/application.yml
+      REDPANDA_CLUSTERS_MANIFEST_PATH: /config/clusters-manifest.yml
+    depends_on:
+      kafka-ui:
+        condition: service_started
+  frontend:
+    environment:
+      <<: *tz_env
+      KAFKA_CONSOLE_PROVIDER: kafka-ui

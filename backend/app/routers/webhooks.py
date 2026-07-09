@@ -141,6 +141,9 @@ async def _handle_push_event(
         if not conn:
             continue
 
+        if not sub.enabled:
+            continue
+
         if provider == "gitlab":
             matched = any(
                 match_gitlab_link(link, repo_full_name, branch)

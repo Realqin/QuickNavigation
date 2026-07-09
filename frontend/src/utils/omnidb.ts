@@ -1,9 +1,8 @@
-import { buildEmbedSessionPageUrl } from './embedSession';
-
 const DEFAULT_OMNIDB_PORT = 8081;
 
+/** OmniDB 必须直连 8081；经 /proxy/omnidb 代理时 302 会落到 8080 首页。 */
 export function resolveOmnidbOpenUrl(embedUrl: string, port = DEFAULT_OMNIDB_PORT): string {
-  const target = new URL(embedUrl);
+  const target = new URL(embedUrl, window.location.origin);
   target.protocol = window.location.protocol;
   target.hostname = window.location.hostname;
   target.port = String(port);
@@ -18,9 +17,7 @@ export async function openOmnidbInNewTab(
   connectionId: number,
 ): Promise<void> {
   const data = await openConsole(connectionId, window.location.hostname);
-  const url = data.session_id
-    ? buildEmbedSessionPageUrl(data.session_id)
-    : resolveOmnidbOpenUrl(data.embed_url);
+  const url = resolveOmnidbOpenUrl(data.embed_url);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
     throw new Error('browser blocked popup');

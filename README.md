@@ -95,6 +95,147 @@ QuickNavigation/
 
 生产部署前请修改 `docker-compose.yml` 中的数据库密码和 `GITHUB_WEBHOOK_SECRET`。
 
+## 离线 / 内网部署（镜像本地化）
+
+若目标服务器无法访问 Docker Hub / 外网，可在**有网络的机器**上先打包镜像，再拷贝到服务器导入。
+
+### 涉及的外部镜像
+
+| 来源 | 镜像 |
+|------|------|
+| Docker Hub | `mysql:8.0`、`nginx:latest`、`python:3.12-slim`、`node:20-alpine`、`nginx:1.27-alpine` |
+| Docker Hub | `omnidbteam/omnidb:latest`、`niruix/sshwifty:latest`、`redis/redisinsight:latest` |
+| Redpanda 仓库 | `docker.redpanda.com/redpandadata/console:v2.8.0` |
+| 本地构建 | `backend`、`frontend`、`omnidb`、`sshwifty`、`redpanda-console`、`redisinsight` 等 |
+
+### 步骤一：有网机器导出
+
+**Windows（开发机）：**
+
+```powershell
+cd E:\workspace\QuickNavigation
+powershell -ExecutionPolicy Bypass -File scripts/docker/export-offline.ps1
+```
+
+**Linux：**
+
+```bash
+cd /path/to/QuickNavigation
+bash scripts/docker/export-offline.sh
+```
+
+完成后会生成：
+
+- `offline/docker-images/quicknav-images.tar` — 全部镜像包
+- `offline/docker-images/images.txt` — 镜像清单
+
+### 步骤二：拷贝到目标服务器
+
+将以下内容传到服务器（U 盘 / scp 均可）：
+
+1. 整个项目目录（或至少 `docker-compose.yml`、`docker-compose.offline.yml`、`docker/`、`backend/`、`frontend/`、`scripts/`）
+2. `offline/docker-images/quicknav-images.tar`
+
+### 步骤三：服务器导入并启动
+
+```bash
+cd /path/to/QuickNavigation
+bash scripts/docker/import-offline.sh
+```
+
+或 Windows 服务器：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/docker/import-offline.ps1
+```
+
+`docker-compose.offline.yml` 会设置 `pull_policy: never`，**只使用本地镜像，不再联网拉取**。
+
+### 仅手动操作（不用脚本）
+
+```bash
+# 有网机器
+export COMPOSE_PROJECT_NAME=quicknav
+docker compose pull mysql sshwifty-app redisinsight-app
+docker compose build
+docker save -o quicknav-images.tar $(docker compose config --images | sort -u)
+
+# 目标服务器
+docker load -i quicknav-images.tar
+docker compose -f docker-compose.yml -f docker-compose.offline.yml up -d --no-build
+```
+
+### 更新镜像后重新导出
+
+代码或 Dockerfile 有变更时，在有网机器重新执行 `export-offline`，再覆盖服务器上的 tar 并 `docker load` 后重启即可。
+
+### 导出时拉取失败（代理 / 10808 端口）
+
+若出现 `connecting to 127.0.0.1:10808`、`EOF` 等错误，通常是 **Docker 走了本机代理但代理不稳定**：
+
+1. 打开 **Docker Desktop → Settings → Resources → Proxies**
+2. 关闭 **Manual proxy configuration**（或修正代理地址）
+3. 重启 Clash / V2Ray 等代理软件（`10808` 端口占用也会导致失败）
+4. 单独测试：`docker pull nginx:latest`
+5. 成功后再执行 `export-offline.ps1`
+
+脚本已自动清除当前终端里的 `HTTP_PROXY` 等变量，但 **Docker 守护进程自己的代理配置** 仍需在 Docker Desktop 里关闭或修正。
+
+### 使用本地代理 + 国内镜像（推荐）
+
+国内拉 Docker Hub 不稳定时，可以 **代理 + 镜像** 组合使用：
+
+**1. Docker Desktop 配置（二选一或同时开）**
+
+- **代理**：Settings → Resources → Proxies → Manual proxy  
+  `http://127.0.0.1:10808`（Clash 端口按你实际改，常见还有 `7890`）
+- **镜像加速**：Settings → Docker Engine，参考 `scripts/docker/daemon.json.example`：
+
+```json
+{
+  "registry-mirrors": ["https://docker.1ms.run", "https://docker.m.daocloud.io"]
+}
+```
+
+**2. 导出脚本环境变量**
+
+```powershell
+# 走本地代理（Clash / V2Ray）
+$env:USE_PROXY = "1"
+$env:HTTP_PROXY = "http://127.0.0.1:10808"   # 或 7890
+
+# 国内镜像（Docker Hub 类镜像会自动 fallback）
+$env:DOCKER_MIRROR = "docker.1ms.run"
+
+# x86 离线包
+powershell -ExecutionPolicy Bypass -File scripts/docker/export-offline.ps1
+
+# ARM64 服务器（had-13 等 aarch64）
+powershell -ExecutionPolicy Bypass -File scripts/docker/export-arm64.ps1
+```
+
+**3. 各镜像来源说明**
+
+| 镜像 | 建议方式 |
+|------|----------|
+| mysql / nginx / python / node | 国内镜像 `docker.1ms.run/library/...` |
+| omnidb / sshwifty / redisinsight | 先镜像，失败再代理 |
+| redpanda console | 仅 redpanda 官方仓库，**通常需要代理** |
+
+**4. 手动测试单镜像**
+
+```powershell
+docker pull docker.1ms.run/library/mysql:8.0
+docker tag docker.1ms.run/library/mysql:8.0 mysql:8.0
+
+docker pull --platform linux/arm64 docker.1ms.run/library/mysql:8.0
+docker tag docker.1ms.run/library/mysql:8.0 mysql:8.0
+```
+
+**5. 代理端口冲突**
+
+若报 `127.0.0.1:10808 ... Only one usage of each socket address`：重启 Clash，或改用混合端口 `7890`，并同步改 Docker Desktop 代理地址。
+
 ## 本地开发
 
 **后端（建议使用虚拟环境，避免与全局 Python 包冲突）：**

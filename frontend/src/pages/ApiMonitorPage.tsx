@@ -37,6 +37,7 @@ import ApiMonitorDebugPanel from '../features/api-monitor/ApiMonitorDebugPanel';
 import ApiMonitorDocPanel from '../features/api-monitor/ApiMonitorDocPanel';
 import { readApiMonitorEnvPreset } from '../features/api-monitor/apiMonitorEnvPreset';
 import { useDictGroup } from '../hooks/useDict';
+import { useTabWorkspaceFilter } from '../hooks/useTabWorkspaceFilter';
 import { getApiErrorMessage, showApiError } from '../utils/apiError';
 
 const METHOD_COLORS: Record<string, string> = {
@@ -197,8 +198,8 @@ async function resolveDefaultFilters(
 
 export default function ApiMonitorPage() {
   const { message } = App.useApp();
-  const projects = useDictGroup('project');
-  const environments = useDictGroup('environment');
+  const { project, environment, setWorkspace, globalVersion } = useTabWorkspaceFilter('apiMonitor');
+  const { projects, environments } = useDictGroup();
   const [filterForm] = Form.useForm();
   const [filterOptions, setFilterOptions] = useState<ApiMonitorFilterOptions>(EMPTY_FILTER_OPTIONS);
   const [filterLoading, setFilterLoading] = useState(true);
@@ -371,28 +372,33 @@ export default function ApiMonitorPage() {
     [filterForm, message],
   );
 
-  const bootstrapPage = useCallback(async () => {
-    const serviceId = await applyDefaultFilters();
-    if (serviceId) {
-      const module = await loadModules(serviceId, { keepSelection: true });
-      if (module) {
-        await loadModuleData(serviceId, module, { keepSelection: true });
+  useEffect(() => {
+    const run = async () => {
+      const serviceId = await applyDefaultFilters({
+        project: project ?? undefined,
+        environment: environment ?? undefined,
+      });
+      if (serviceId) {
+        const module = await loadModules(serviceId, { keepSelection: true });
+        if (module) {
+          await loadModuleData(serviceId, module, { keepSelection: true });
+        } else {
+          clearServiceData();
+        }
       } else {
         clearServiceData();
       }
-    } else {
-      clearServiceData();
-    }
-  }, [applyDefaultFilters, clearServiceData, loadModules, loadModuleData]);
-
-  useEffect(() => {
-    bootstrapPage().catch(() => undefined);
-    // 仅首次进入页面时加载，避免 bootstrapPage 引用变化导致循环刷新
-  }, []);
+    };
+    run().catch(() => undefined);
+  }, [applyDefaultFilters, clearServiceData, environment, globalVersion, loadModuleData, loadModules, project]);
 
   const handleFilterChange = async (changed: Partial<Record<string, unknown>>) => {
     if (suppressFilterChangeRef.current) {
       return;
+    }
+    if ('project' in changed || 'environment' in changed) {
+      const values = filterForm.getFieldsValue();
+      setWorkspace(values.project as number | undefined, values.environment as number | undefined);
     }
     if ('project' in changed) {
       const project = changed.project as number | undefined;

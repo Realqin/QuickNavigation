@@ -13,10 +13,11 @@ import {
   Typography,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchK8sAlarmMonitorGroups,
   fetchK8sAlarmMonitorServices,
+  resolveConnectionK8sAlarmCluster,
   saveK8sAlarmMonitorService,
   syncK8sAlarmMonitor,
   syncK8sAlarmMonitorGroup,
@@ -36,6 +37,7 @@ import { showApiError } from '../utils/apiError';
 interface K8sAlarmMonitorPanelProps {
   open: boolean;
   clusterId: number | null;
+  connectionId?: number | null;
   onClose: () => void;
 }
 
@@ -69,9 +71,14 @@ function buildDraftsFromServices(services: K8sAlarmMonitorService[]) {
 export default function K8sAlarmMonitorPanel({
   open,
   clusterId,
+  connectionId = null,
   onClose,
 }: K8sAlarmMonitorPanelProps) {
   const { message } = App.useApp();
+  const [resolvedClusterId, setResolvedClusterId] = useState<number | null>(null);
+  const [clusterResolving, setClusterResolving] = useState(false);
+  const effectiveClusterId = connectionId ? resolvedClusterId : clusterId;
+  const serviceLoadSeq = useRef(0);
   const [groups, setGroups] = useState<K8sAlarmMonitorGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupKeyword, setGroupKeyword] = useState('');
@@ -90,12 +97,12 @@ export default function K8sAlarmMonitorPanel({
   const [switchingNamespace, setSwitchingNamespace] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
-    if (!clusterId) {
+    if (!effectiveClusterId) {
       return;
     }
     setGroupsLoading(true);
     try {
-      const list = await fetchK8sAlarmMonitorGroups(clusterId);
+      const list = await fetchK8sAlarmMonitorGroups(effectiveClusterId);
       setGroups(list);
       setGroupPage(1);
     } catch (error) {
@@ -103,15 +110,15 @@ export default function K8sAlarmMonitorPanel({
     } finally {
       setGroupsLoading(false);
     }
-  }, [clusterId, message]);
+  }, [effectiveClusterId]);
 
   const handleSyncAllGroups = async () => {
-    if (!clusterId) {
+    if (!effectiveClusterId) {
       return;
     }
     setSyncingAll(true);
     try {
-      const result = await syncK8sAlarmMonitor(clusterId);
+      const result = await syncK8sAlarmMonitor(effectiveClusterId);
       await loadGroups();
       message.success(`已同步 ${result.groups_count} 个分组`);
     } catch (error) {
@@ -121,51 +128,94 @@ export default function K8sAlarmMonitorPanel({
     }
   };
 
-  const loadServices = useCallback(
+  const loadServicesFromDb = useCallback(
     async (namespace: string) => {
-      if (!clusterId) {
-        return;
+      if (!effectiveClusterId) {
+        setServices([]);
+        setEditDrafts({});
+        return [];
       }
+      const requestId = ++serviceLoadSeq.current;
       setServicesLoading(true);
       try {
-        const list = await fetchK8sAlarmMonitorServices(clusterId, namespace);
+        const list = await fetchK8sAlarmMonitorServices(effectiveClusterId, namespace);
+        if (requestId !== serviceLoadSeq.current) {
+          return list;
+        }
         setServices(list);
         setEditDrafts(buildDraftsFromServices(list));
         return list;
       } catch (error) {
+        if (requestId === serviceLoadSeq.current) {
+          setServices([]);
+          setEditDrafts({});
+        }
         showApiError(error, '加载服务监控配置失败');
         return [];
       } finally {
-        setServicesLoading(false);
+        if (requestId === serviceLoadSeq.current) {
+          setServicesLoading(false);
+        }
       }
     },
-    [clusterId, message],
+    [effectiveClusterId],
   );
 
-  const refreshNamespace = useCallback(
+  const syncNamespaceServices = useCallback(
     async (namespace: string) => {
-      if (!clusterId) {
+      if (!effectiveClusterId) {
         return;
       }
       setServicesLoading(true);
       try {
-        const result = await syncK8sAlarmMonitorGroup(clusterId, namespace);
-        await loadServices(namespace);
-        message.success(`已同步服务列表，共 ${result.services_count} 个服务`);
+        const result = await syncK8sAlarmMonitorGroup(effectiveClusterId, namespace);
+        await loadServicesFromDb(namespace);
+        message.success(`已从集群同步 ${result.services_count} 个服务`);
       } catch (error) {
         showApiError(error, '同步服务列表失败');
       } finally {
         setServicesLoading(false);
       }
     },
-    [clusterId, loadServices, message],
+    [effectiveClusterId, loadServicesFromDb, message],
   );
 
   useEffect(() => {
-    if (open && clusterId) {
+    if (!open) {
+      setResolvedClusterId(null);
+      return;
+    }
+    if (!connectionId) {
+      return;
+    }
+    let cancelled = false;
+    setClusterResolving(true);
+    resolveConnectionK8sAlarmCluster(connectionId)
+      .then((result) => {
+        if (!cancelled) {
+          setResolvedClusterId(result.cluster_id);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          showApiError(error, '解析 K8s 集群失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setClusterResolving(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, connectionId, clusterId]);
+
+  useEffect(() => {
+    if (open && effectiveClusterId) {
       loadGroups().catch(() => undefined);
     }
-  }, [open, clusterId, loadGroups]);
+  }, [open, effectiveClusterId, loadGroups]);
 
   useEffect(() => {
     if (!open) {
@@ -214,12 +264,12 @@ export default function K8sAlarmMonitorPanel({
   }, [serviceKeyword, services]);
 
   const handleToggleGroup = async (namespace: string, enabled: boolean) => {
-    if (!clusterId) {
+    if (!effectiveClusterId) {
       return;
     }
     setSwitchingNamespace(namespace);
     try {
-      const updated = await updateK8sAlarmMonitorGroup(clusterId, namespace, enabled);
+      const updated = await updateK8sAlarmMonitorGroup(effectiveClusterId, namespace, enabled);
       setGroups((prev) =>
         prev.map((item) => (item.namespace === namespace ? { ...item, ...updated } : item)),
       );
@@ -235,18 +285,25 @@ export default function K8sAlarmMonitorPanel({
     setActiveNamespace(namespace);
     setServiceKeyword('');
     setViewOpen(true);
-    loadServices(namespace).catch(() => undefined);
+    setEditOpen(false);
   };
 
   const openEdit = (namespace: string) => {
     setActiveNamespace(namespace);
     setServiceKeyword('');
     setEditOpen(true);
-    loadServices(namespace).catch(() => undefined);
+    setViewOpen(false);
   };
 
+  useEffect(() => {
+    if ((!viewOpen && !editOpen) || !activeNamespace || !effectiveClusterId || clusterResolving) {
+      return;
+    }
+    loadServicesFromDb(activeNamespace).catch(() => undefined);
+  }, [viewOpen, editOpen, activeNamespace, effectiveClusterId, clusterResolving, loadServicesFromDb]);
+
   const handleSaveAll = async () => {
-    if (!clusterId || !activeNamespace) {
+    if (!effectiveClusterId || !activeNamespace) {
       return;
     }
     const serviceNames = services.map((item) => item.service_name);
@@ -262,13 +319,13 @@ export default function K8sAlarmMonitorPanel({
             restart_monitor: 'none' as K8sRestartMonitorOption,
             watermarkDraft: null,
           };
-          return saveK8sAlarmMonitorService(clusterId, activeNamespace, serviceName, {
+          return saveK8sAlarmMonitorService(effectiveClusterId, activeNamespace, serviceName, {
             restart_monitor: draft.restart_monitor,
             watermark_minutes: draft.watermarkDraft,
           });
         }),
       );
-      await loadServices(activeNamespace);
+      await loadServicesFromDb(activeNamespace);
       message.success('监控配置已保存');
     } catch (error) {
       showApiError(error, '保存监控配置失败');
@@ -285,9 +342,21 @@ export default function K8sAlarmMonitorPanel({
         ellipsis: true,
       },
       {
+        title: '服务数',
+        width: 72,
+        align: 'center',
+        render: (_, row) => row.service_count,
+      },
+      {
+        title: '已配置',
+        width: 72,
+        align: 'center',
+        render: (_, row) => row.monitored_service_count,
+      },
+      {
         title: '开关',
         dataIndex: 'enabled',
-        width: 100,
+        width: 72,
         render: (enabled: boolean, row) => (
           <Switch
             checked={enabled}
@@ -429,14 +498,20 @@ export default function K8sAlarmMonitorPanel({
         open={open}
         onCancel={onClose}
         footer={null}
-        width={760}
+        width={860}
         destroyOnHidden
         className="k8s-alarm-monitor-modal"
       >
+        {clusterResolving ? (
+          <div className="k8s-alarm-monitor-modal__loading">
+            <Spin tip="正在解析集群..." />
+          </div>
+        ) : null}
         <div className="k8s-alarm-monitor-modal__toolbar">
           <Button
             icon={<ReloadOutlined />}
             loading={syncingAll}
+            disabled={!effectiveClusterId}
             onClick={() => {
               handleSyncAllGroups().catch(() => undefined);
             }}
@@ -444,7 +519,7 @@ export default function K8sAlarmMonitorPanel({
             同步全部分组
           </Button>
           <Typography.Text type="secondary">
-            仅拉取项目列表入库；服务列表请在分组内点「刷新」同步
+            查看/编辑打开时自动读库；需更新服务名时点「从集群同步」
           </Typography.Text>
           <Input
             allowClear
@@ -467,7 +542,7 @@ export default function K8sAlarmMonitorPanel({
         </div>
         <Table<K8sAlarmMonitorGroup>
           rowKey="namespace"
-          loading={groupsLoading}
+          loading={groupsLoading || clusterResolving}
           dataSource={paginatedGroups}
           columns={groupColumns}
           pagination={{
@@ -505,17 +580,17 @@ export default function K8sAlarmMonitorPanel({
             loading={servicesLoading}
             onClick={() => {
               if (activeNamespace) {
-                refreshNamespace(activeNamespace).catch(() => undefined);
+                syncNamespaceServices(activeNamespace).catch(() => undefined);
               }
             }}
           >
-            刷新
+            从集群同步
           </Button>
           {serviceSearchInput}
         </div>
-        {servicesLoading ? (
+        {clusterResolving || servicesLoading ? (
           <div className="k8s-alarm-monitor-modal__loading">
-            <Spin />
+            <Spin tip={clusterResolving ? '正在解析集群...' : '正在加载...'} />
           </div>
         ) : (
           <Table<K8sAlarmMonitorService>
@@ -525,7 +600,9 @@ export default function K8sAlarmMonitorPanel({
             pagination={false}
             size="small"
             scroll={{ y: SERVICE_TABLE_SCROLL_Y }}
-            locale={{ emptyText: '暂无服务数据' }}
+            locale={{
+              emptyText: '暂无服务数据，可点「从集群同步」拉取服务名',
+            }}
           />
         )}
       </Modal>
@@ -552,20 +629,20 @@ export default function K8sAlarmMonitorPanel({
             loading={servicesLoading}
             onClick={() => {
               if (activeNamespace) {
-                refreshNamespace(activeNamespace).catch(() => undefined);
+                syncNamespaceServices(activeNamespace).catch(() => undefined);
               }
             }}
           >
-            刷新
+            从集群同步
           </Button>
           {serviceSearchInput}
           <Typography.Text type="secondary">
-            刷新将从集群同步服务名称入库，已保存的监控配置不会丢失。
+            从集群同步仅更新服务名称列表，已保存的监控配置不会丢失。
           </Typography.Text>
         </div>
-        {servicesLoading ? (
+        {clusterResolving || servicesLoading ? (
           <div className="k8s-alarm-monitor-modal__loading">
-            <Spin />
+            <Spin tip={clusterResolving ? '正在解析集群...' : '正在加载...'} />
           </div>
         ) : (
           <Table<K8sAlarmMonitorService>
@@ -575,7 +652,9 @@ export default function K8sAlarmMonitorPanel({
             pagination={false}
             size="small"
             scroll={{ x: 760, y: SERVICE_TABLE_SCROLL_Y }}
-            locale={{ emptyText: '暂无服务数据' }}
+            locale={{
+              emptyText: '暂无服务数据，可点「从集群同步」拉取服务名后再配置监控',
+            }}
           />
         )}
       </Modal>

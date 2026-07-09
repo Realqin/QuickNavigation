@@ -239,7 +239,7 @@ def build_k8s_subscription_links(
     cluster_id: int | None,
 ) -> list[dict[str, Any]]:
     states = link_enabled or {}
-    enabled = bool(states.get("main", sub.enabled))
+    enabled = bool(states.get("main", False))
     visit_url = str(conn.url or conn.host or "").strip()
     return [
         {
@@ -258,5 +258,7 @@ def build_k8s_subscription_links(
 
 
 def is_k8s_subscription_enabled(sub: Subscription) -> bool:
+    if not sub.enabled:
+        return False
     states = sub.link_enabled or {}
-    return bool(states.get("main", sub.enabled))
+    return bool(states.get("main", False))

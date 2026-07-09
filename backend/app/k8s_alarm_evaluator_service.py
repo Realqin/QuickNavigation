@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.k8s_monitor_service import (
     FlinkHttpClientPool,
@@ -220,6 +220,9 @@ def mark_k8s_alarm_events_read_all(db: Session, cluster_id: int) -> int:
 
 
 def _list_monitor_targets(db: Session) -> list[dict[str, Any]]:
+    from app.k8s_connection_service import is_k8s_subscription_enabled
+    from app.models import Connection
+
     rows = (
         db.query(K8sAlarmMonitorService, K8sAlarmMonitorGroup, K8sClusterConfig)
         .join(
@@ -241,6 +244,15 @@ def _list_monitor_targets(db: Session) -> list[dict[str, Any]]:
     )
     targets: list[dict[str, Any]] = []
     for service_row, _group_row, cluster in rows:
+        if cluster.connection_id:
+            conn = (
+                db.query(Connection)
+                .options(joinedload(Connection.subscription))
+                .filter(Connection.id == cluster.connection_id)
+                .first()
+            )
+            if not conn or not conn.subscription or not is_k8s_subscription_enabled(conn.subscription):
+                continue
         targets.append(
             {
                 "cluster": cluster,

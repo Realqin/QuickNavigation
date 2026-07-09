@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   cancelEmbedSessionClose,
-  loadEmbedSessionUrl,
+  loadEmbedSessionTarget,
   registerEmbedSessionCleanup,
   scheduleEmbedSessionClose,
 } from '../utils/embedSession';
@@ -25,11 +25,16 @@ export default function EmbedSessionPage() {
 
     let cancelled = false;
     setLoading(true);
-    loadEmbedSessionUrl(sessionId)
-      .then((url) => {
-        if (!cancelled) {
-          setSrc(url);
+    loadEmbedSessionTarget(sessionId)
+      .then((target) => {
+        if (cancelled) {
+          return;
         }
+        if (!target.embed) {
+          window.location.replace(target.url);
+          return;
+        }
+        setSrc(target.url);
       })
       .catch((error) => {
         if (!cancelled) {

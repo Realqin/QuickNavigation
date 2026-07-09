@@ -185,6 +185,7 @@ class ConnectionBase(BaseModel):
 class ConnectionCreate(ConnectionBase):
     group_id: int
     password: str | None = Field(default=None, max_length=512)
+    subscription_enabled: bool = False
 
     @field_validator("group_id", mode="before")
     @classmethod
@@ -213,6 +214,7 @@ class ConnectionUpdate(BaseModel):
     database_name: str | None = Field(default=None, max_length=128)
     mqtt_ws_path: str | None = Field(default=None, max_length=128)
     mqtt_subscriptions: list[MqttSubscriptionItem] | None = None
+    subscription_enabled: bool | None = None
 
     @field_validator("mqtt_subscriptions", mode="before")
     @classmethod
@@ -249,6 +251,7 @@ class ConnectionOut(ConnectionBase):
     password_set: bool = False
     is_reachable: bool | None = None
     last_checked_at: datetime | None = None
+    subscription_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -496,6 +499,7 @@ class PublicConfigOut(BaseModel):
     sshwifty_base_url: str = ""
     redpanda_base_url: str = ""
     redisinsight_base_url: str = ""
+    kafka_console_provider: str = "redpanda"
 
 
 class EmbedSessionOut(BaseModel):
@@ -843,6 +847,11 @@ class K8sAlarmMonitorSyncOut(BaseModel):
     groups_count: int = 0
     services_count: int = 0
     namespaces: list[str] = Field(default_factory=list)
+
+
+class ConnectionK8sAlarmClusterOut(BaseModel):
+    cluster_id: int
+    cluster_name: str
 
 
 class K8sAlarmEventOut(BaseModel):
@@ -1323,3 +1332,82 @@ class PromptTemplateOut(BaseModel):
     is_preset: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class MenuPermissionNodeOut(BaseModel):
+    key: str
+    title: str
+    children: list["MenuPermissionNodeOut"] | None = None
+
+
+class AuthLoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    nickname: str
+    password: str = ""
+    menu_permissions: list[str] = Field(default_factory=list)
+    is_admin: bool = False
+    is_active: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuthLoginOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class AuthMeOut(BaseModel):
+    user: UserOut
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    nickname: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
+    menu_permissions: list[str] = Field(default_factory=list)
+    is_admin: bool = False
+    is_active: bool = True
+
+
+class UserUpdate(BaseModel):
+    nickname: str | None = Field(default=None, min_length=1, max_length=128)
+    password: str | None = Field(default=None, min_length=1, max_length=128)
+    menu_permissions: list[str] | None = None
+    is_admin: bool | None = None
+    is_active: bool | None = None
+
+
+class OperationLogOut(BaseModel):
+    id: int
+    user_id: int | None
+    username: str
+    action: str
+    action_label: str
+    resource_type: str | None = None
+    resource_id: str | None = None
+    content: str
+    ip_address: str | None = None
+    created_at: datetime
+
+
+class OperationLogListOut(BaseModel):
+    items: list[OperationLogOut]
+    total: int
+
+
+class OperationLogReportIn(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    content: str = Field(default="", max_length=512)
+    menu_key: str | None = Field(default=None, max_length=64)
+    resource_type: str | None = Field(default=None, max_length=64)
+    resource_id: str | None = Field(default=None, max_length=128)
+
+
+MenuPermissionNodeOut.model_rebuild()

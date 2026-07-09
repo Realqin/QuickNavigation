@@ -1,5 +1,5 @@
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Button, Select, Space, Typography, message } from 'antd';
+import { Button, Space, Typography, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createConnection,
@@ -22,7 +22,6 @@ import {
   buildLabelColorMap,
   buildLabelIconIndexMap,
   buildLabelOrderMap,
-  dictToOptions,
   useDict,
 } from '../hooks/useDict';
 import { useActivityLogDetail } from '../hooks/useActivityLogDetail';
@@ -33,26 +32,28 @@ import { openRedpandaInNewTab } from '../utils/redpanda';
 import { openRedisinsightInNewTab } from '../utils/redisinsight';
 import { openSshwiftyInNewTab } from '../utils/sshwifty';
 import { showApiError } from '../utils/apiError';
+import { useAuth } from '../contexts/AuthContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { filterLabelOptionsByPermission } from '../utils/connectionPermissions';
 
 const EXPAND_KEY = 'quicknav-collapse';
-const PROJECT_KEY = 'quicknav-project';
-const ENV_KEY = 'quicknav-environment';
 const HOME_LOG_LIMIT = 8;
-
-function loadStorageNumber(key: string): number | null {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : null;
-}
 
 function loadGroupExpanded(groupId: number): boolean {
   return localStorage.getItem(`${EXPAND_KEY}-group-${groupId}`) !== 'false';
 }
 
 export default function HomePage() {
-  const { items: projectItems, options: projectOptions, idMap: projectIdMap } = useDict('project');
-  const { items: envItems, options: environmentOptions, idMap: envIdMap } = useDict('environment');
+  const { user } = useAuth();
+  const {
+    globalProject: resolvedProject,
+    globalEnvironment: resolvedEnvironment,
+    projectIdMap,
+    environmentIdMap,
+    projectOptions,
+    environmentOptions,
+    globalVersion,
+  } = useWorkspace();
   const { items: labelItems, options: labelOptions, idMap: labelIdMap } = useDict('label');
   const {
     items: groupItems,
@@ -68,8 +69,6 @@ export default function HomePage() {
     [groupItems],
   );
 
-  const [project, setProject] = useState<number | null>(() => loadStorageNumber(PROJECT_KEY));
-  const [environment, setEnvironment] = useState<number | null>(() => loadStorageNumber(ENV_KEY));
   const [groups, setGroups] = useState<HomeGroup[]>([]);
   const [expandedMap, setExpandedMap] = useState<Record<number, boolean>>({});
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -78,15 +77,6 @@ export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
   const { openActivityLogDetail, detailModals } = useActivityLogDetail();
-  const resolvedProject = useMemo(() => {
-    if (project && projectOptions.some((o) => o.value === project)) return project;
-    return projectOptions[0]?.value ?? null;
-  }, [project, projectOptions]);
-
-  const resolvedEnvironment = useMemo(() => {
-    if (environment && environmentOptions.some((o) => o.value === environment)) return environment;
-    return environmentOptions[0]?.value ?? null;
-  }, [environment, environmentOptions]);
 
   const loadData = useCallback(async () => {
     if (resolvedProject == null || resolvedEnvironment == null) return;
@@ -115,31 +105,19 @@ export default function HomePage() {
   }, [resolvedProject, resolvedEnvironment]);
 
   useEffect(() => {
-    if (resolvedProject != null) localStorage.setItem(PROJECT_KEY, String(resolvedProject));
-    if (resolvedEnvironment != null) localStorage.setItem(ENV_KEY, String(resolvedEnvironment));
     loadData();
-  }, [resolvedProject, resolvedEnvironment, loadData]);
-
-  useEffect(() => {
-    if (project == null && projectOptions[0]) setProject(projectOptions[0].value);
-  }, [project, projectOptions]);
-
-  useEffect(() => {
-    if (environment == null && environmentOptions[0]) setEnvironment(environmentOptions[0].value);
-  }, [environment, environmentOptions]);
+  }, [loadData, globalVersion]);
 
   useEffect(() => {
     if (resolvedProject == null || resolvedEnvironment == null) return;
-    const handle = createLogsWebSocket((log) => {
-      if (
-        log.project === String(resolvedProject) &&
-        log.environment === String(resolvedEnvironment)
-      ) {
+    const handle = createLogsWebSocket(
+      (log) => {
         setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, HOME_LOG_LIMIT));
-      }
-    });
+      },
+      { project: resolvedProject, environment: resolvedEnvironment },
+    );
     return () => handle.close();
-  }, [resolvedProject, resolvedEnvironment]);
+  }, [resolvedProject, resolvedEnvironment, globalVersion]);
 
   const handleExpandChange = (key: string, expanded: boolean) => {
     localStorage.setItem(`${EXPAND_KEY}-${key}`, String(expanded));
@@ -288,15 +266,19 @@ export default function HomePage() {
     }
   };
 
-  const selectProjectOptions = projectOptions.length ? projectOptions : dictToOptions(projectItems);
-  const selectEnvironmentOptions = environmentOptions.length
-    ? environmentOptions
-    : dictToOptions(envItems);
-  const selectGroupOptions = groupOptions.length ? groupOptions : dictToOptions(groupItems);
+  const selectProjectOptions = projectOptions;
+  const selectEnvironmentOptions = environmentOptions;
+  const selectGroupOptions = groupOptions;
+  const allowedLabelOptions = useMemo(
+    () => filterLabelOptionsByPermission(user, labelOptions, labelItems),
+    [labelItems, labelOptions, user],
+  );
 
   const projectLabel = resolvedProject != null ? projectIdMap[resolvedProject] ?? resolvedProject : '';
   const environmentLabel =
-    resolvedEnvironment != null ? envIdMap[resolvedEnvironment] ?? resolvedEnvironment : '';
+    resolvedEnvironment != null
+      ? environmentIdMap[resolvedEnvironment] ?? resolvedEnvironment
+      : '';
 
   return (
     <div className="home-page">
@@ -305,6 +287,9 @@ export default function HomePage() {
           <Typography.Title level={5} style={{ margin: 0 }}>
             快捷导航
           </Typography.Title>
+          <Typography.Text type="secondary">
+            {projectLabel} / {environmentLabel}
+          </Typography.Text>
           <Button
             icon={<EditOutlined />}
             type={editMode ? 'primary' : 'default'}
@@ -314,20 +299,6 @@ export default function HomePage() {
           </Button>
         </Space>
         <Space wrap>
-          <Select
-            style={{ width: 180 }}
-            value={resolvedProject ?? undefined}
-            options={selectProjectOptions}
-            onChange={setProject}
-            placeholder="选择项目"
-          />
-          <Select
-            style={{ width: 160 }}
-            value={resolvedEnvironment ?? undefined}
-            options={selectEnvironmentOptions}
-            onChange={setEnvironment}
-            placeholder="选择环境"
-          />
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>
             刷新
           </Button>
@@ -338,7 +309,7 @@ export default function HomePage() {
               setEditing(null);
               setModalOpen(true);
             }}
-            disabled={!labelOptions.length || !selectGroupOptions.length}
+            disabled={!allowedLabelOptions.length || !selectGroupOptions.length}
           >
             新增连接
           </Button>
@@ -382,7 +353,7 @@ export default function HomePage() {
                 labelIconIndexMap={labelIconIndexMap}
                 labelOrderMap={labelOrderMap}
                 projectIdMap={projectIdMap}
-                envIdMap={envIdMap}
+                envIdMap={environmentIdMap}
               />
             </div>
           ))}
@@ -397,7 +368,7 @@ export default function HomePage() {
         connection={editing}
         projectOptions={selectProjectOptions}
         environmentOptions={selectEnvironmentOptions}
-        labelOptions={labelOptions}
+        labelOptions={allowedLabelOptions}
         labelItems={labelItems}
         groupOptions={selectGroupOptions}
         groupItems={groupItems}

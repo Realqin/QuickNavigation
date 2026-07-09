@@ -373,6 +373,7 @@ def connection_to_out_dict(conn: Connection) -> dict[str, Any]:
         "password_set": bool(conn.password),
         "is_reachable": conn.is_reachable,
         "last_checked_at": conn.last_checked_at,
+        "subscription_enabled": bool(conn.subscription and conn.subscription.enabled),
         "created_at": conn.created_at,
         "updated_at": conn.updated_at,
     }
@@ -869,7 +870,9 @@ def get_home_data(db: Session, project: int, environment: int) -> dict[str, Any]
 
 def create_connection(db: Session, data: ConnectionCreate) -> Connection:
 
-    payload = _normalize_connection_payload(data.model_dump())
+    raw = data.model_dump()
+    subscription_enabled = bool(raw.pop("subscription_enabled", False))
+    payload = _normalize_connection_payload(raw)
 
     _validate_connection_dict_values(db, payload)
 
@@ -899,6 +902,8 @@ def create_connection(db: Session, data: ConnectionCreate) -> Connection:
 
     sync_k8s_cluster_from_connection(db, conn)
 
+    apply_connection_subscription_enabled(db, conn, subscription_enabled)
+
     return conn
 
 
@@ -907,7 +912,9 @@ def create_connection(db: Session, data: ConnectionCreate) -> Connection:
 
 def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> Connection:
 
-    payload = data.model_dump(exclude_unset=True)
+    raw = data.model_dump(exclude_unset=True)
+    subscription_enabled = raw.pop("subscription_enabled", None)
+    payload = raw
 
     if "password" in payload and not str(payload.get("password") or "").strip():
         payload.pop("password", None)
@@ -996,6 +1003,10 @@ def update_connection(db: Session, conn: Connection, data: ConnectionUpdate) -> 
     from app.k8s_connection_service import sync_k8s_cluster_from_connection
 
     sync_k8s_cluster_from_connection(db, conn)
+
+    sync_k8s_cluster_from_connection(db, conn)
+
+    apply_connection_subscription_enabled(db, conn, subscription_enabled)
 
     return conn
 
@@ -1096,6 +1107,42 @@ def _redis_label_ids(db: Session) -> set[int]:
 
 def connection_is_redis_type(db: Session, conn: Connection) -> bool:
     return conn.type in _redis_label_ids(db)
+
+
+def connection_supports_log_subscription(db: Session, conn: Connection) -> bool:
+    return conn.type in _subscription_label_ids(db)
+
+
+def subscription_link_active(sub: Subscription) -> bool:
+    states = sub.link_enabled or {}
+    return any(bool(value) for value in states.values())
+
+
+def subscription_ready_for_polling(db: Session, sub: Subscription, conn: Connection) -> bool:
+    if not sub.enabled:
+        return False
+    if connection_is_gitlab_type(db, conn):
+        return any(
+            link.get("enabled")
+            for link in build_gitlab_subscription_links(conn, sub.link_enabled)
+        )
+    return subscription_link_active(sub)
+
+
+def apply_connection_subscription_enabled(
+    db: Session,
+    conn: Connection,
+    enabled: bool | None,
+) -> None:
+    if enabled is None or not connection_supports_log_subscription(db, conn):
+        return
+    ensure_gitlab_subscription(db, conn, refresh=False)
+    ensure_database_subscription(db, conn)
+    ensure_k8s_subscription(db, conn)
+    if conn.subscription and conn.subscription.enabled != enabled:
+        conn.subscription.enabled = enabled
+        db.commit()
+        db.refresh(conn)
 
 
 def _dict_ids_display(db: Session, dict_type: str, ids: list | None) -> str:
@@ -1201,7 +1248,7 @@ def build_database_subscription_links(
     link_enabled: dict[str, bool] | None,
 ) -> list[dict[str, Any]]:
     states = link_enabled or {}
-    enabled = bool(states.get("main", sub.enabled))
+    enabled = bool(states.get("main", False))
     return [
         {
             "link_key": "main",
@@ -1386,6 +1433,8 @@ def list_gitlab_subscription_trees(
         conn = sub.connection
         if not conn:
             continue
+        if not sub.enabled:
+            continue
         conn_type = conn.type
         if conn_type in gitlab_ids:
             links = build_gitlab_subscription_links(conn, sub.link_enabled)
@@ -1446,7 +1495,7 @@ def _attach_api_snapshot_meta(db: Session, trees: list[dict[str, Any]]) -> None:
 
 
 def iter_enabled_gitlab_links(sub: Subscription, provider: str, event: str):
-    if provider != "gitlab" or not sub.connection:
+    if provider != "gitlab" or not sub.connection or not sub.enabled:
         return
     if sub.github_events and event not in sub.github_events:
         return
@@ -1821,8 +1870,10 @@ def handle_database_webhook(db: Session, payload: DatabaseWebhookPayload) -> Act
         raise ValueError("Connection not found for webhook payload")
 
     if sub:
+        if not sub.enabled:
+            raise ValueError("Subscription is disabled")
         link_states = sub.link_enabled or {}
-        main_enabled = bool(link_states.get("main", sub.enabled))
+        main_enabled = bool(link_states.get("main", False))
         if not main_enabled:
             raise ValueError("Subscription is disabled")
 

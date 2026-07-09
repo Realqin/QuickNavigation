@@ -32,10 +32,13 @@ import {
   updateConnection,
 } from '../api';
 import ConnectionFormModal from '../components/ConnectionFormModal';
+import { useAuth } from '../contexts/AuthContext';
 import { useDictGroup } from '../hooks/useDict';
+import { useTabWorkspaceFilter } from '../hooks/useTabWorkspaceFilter';
 import type { Connection, ConnectionFormValues, SubLink } from '../types';
 import { formatConnectionEndpoint, getConnectionOpenUrl } from '../utils/connectionType';
 import { showApiError } from '../utils/apiError';
+import { filterLabelOptionsByPermission } from '../utils/connectionPermissions';
 
 interface FilterValues {
   name?: string;
@@ -111,6 +114,8 @@ function buildRows(connections: Connection[], expandedIds: Set<number>): Connect
 }
 
 export default function ConnectionsPage() {
+  const { user } = useAuth();
+  const { project, environment, setWorkspace, globalVersion } = useTabWorkspaceFilter('connections');
   const { projects, environments, labels, connectionGroups } = useDictGroup();
   const [form] = Form.useForm<FilterValues>();
   const projectFilterOptions = useMemo(
@@ -120,6 +125,10 @@ export default function ConnectionsPage() {
   const environmentFilterOptions = useMemo(
     () => [{ label: '其他', value: FILTER_EMPTY }, ...environments.options],
     [environments.options],
+  );
+  const allowedLabelOptions = useMemo(
+    () => filterLabelOptionsByPermission(user, labels.options, labels.items),
+    [labels.items, labels.options, user],
   );
   const [data, setData] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(false);
@@ -178,8 +187,17 @@ export default function ConnectionsPage() {
   }, [form]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    form.setFieldsValue({
+      project: project ?? undefined,
+      environment: environment ?? undefined,
+    });
+    void loadData({
+      project: project ?? undefined,
+      environment: environment ?? undefined,
+      group_id: form.getFieldValue('group_id'),
+      name: form.getFieldValue('name'),
+    });
+  }, [project, environment, globalVersion]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -216,6 +234,9 @@ export default function ConnectionsPage() {
   };
 
   const handleValuesChange = (changed: Partial<FilterValues>, allValues: FilterValues) => {
+    if ('project' in changed || 'environment' in changed) {
+      setWorkspace(allValues.project, allValues.environment);
+    }
     if ('project' in changed || 'environment' in changed || 'group_id' in changed) {
       loadData(allValues);
       return;
@@ -313,7 +334,7 @@ export default function ConnectionsPage() {
               setEditing(null);
               setModalOpen(true);
             }}
-            disabled={!labels.options.length}
+            disabled={!allowedLabelOptions.length}
           >
             新增
           </Button>
@@ -568,7 +589,7 @@ export default function ConnectionsPage() {
         connection={editing}
         projectOptions={projects.options}
         environmentOptions={environments.options}
-        labelOptions={labels.options}
+        labelOptions={allowedLabelOptions}
         labelItems={labels.items}
         groupOptions={connectionGroups.options}
         groupItems={connectionGroups.items}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchDictItems } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 import type { DictItem, DictType } from '../types';
+import { getCachedDictItems, subscribeDictCache } from '../utils/dictCache';
 
 export {
   buildLabelColorMap,
@@ -17,24 +19,42 @@ export function dictToOptions(items: DictItem[]) {
 }
 
 export function useDict(type?: DictType) {
-  const [items, setItems] = useState<DictItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { token, loading: authLoading } = useAuth();
+  const canFetch = Boolean(token) && !authLoading;
+  const [items, setItems] = useState<DictItem[]>(() => getCachedDictItems(type) ?? []);
+  const [loading, setLoading] = useState(() => canFetch && getCachedDictItems(type) === undefined);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (force = false) => {
+    if (!canFetch && !force) {
+      return;
+    }
+    if (force || getCachedDictItems(type) === undefined) {
+      setLoading(true);
+    }
     try {
-      const list = await fetchDictItems(type);
+      const list = await fetchDictItems(type, { force });
       setItems(list);
     } catch {
-      setItems([]);
+      if (getCachedDictItems(type) === undefined) {
+        setItems([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [type]);
+  }, [canFetch, type]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!canFetch) {
+      return;
+    }
+    void load();
+    return subscribeDictCache(type, () => {
+      const cached = getCachedDictItems(type);
+      if (cached) {
+        setItems(cached);
+      }
+    });
+  }, [canFetch, load, type]);
 
   const options = useMemo(() => dictToOptions(items), [items]);
   const idMap = useMemo(
@@ -42,7 +62,9 @@ export function useDict(type?: DictType) {
     [items],
   );
 
-  return { items, options, idMap, loading, reload: load };
+  const reload = useCallback(() => load(true), [load]);
+
+  return { items, options, idMap, loading, reload };
 }
 
 export function useDictGroup() {

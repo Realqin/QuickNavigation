@@ -1,6 +1,13 @@
 import axios from 'axios';
 import { resolveApiBaseUrl } from '../utils/apiBase';
 import { buildLogsWebSocketUrl } from '../utils/appWebSocket';
+import {
+  getCachedDictItems,
+  getInflightDictRequest,
+  invalidateDictCache,
+  setCachedDictItems,
+  trackInflightDictRequest,
+} from '../utils/dictCache';
 import type {
   ActivityLog,
   ActivityLogDiff,
@@ -51,19 +58,61 @@ import type {
   K8sAlarmEvent,
   K8sRestartMonitorOption,
 } from '../types/k8s';
+import { coalesceGet } from '../utils/getCoalesce';
+import { acquireHttpSlot, releaseHttpSlot } from '../utils/httpQueue';
 
 export { getApiErrorMessage, showApiError } from '../utils/apiError';
+
+const HTTP_QUEUED = Symbol('httpQueued');
 
 const client = axios.create({
   baseURL: resolveApiBaseUrl(),
   timeout: 15000,
 });
 
+client.interceptors.request.use(async (config) => {
+  await acquireHttpSlot();
+  (config as typeof config & { [HTTP_QUEUED]?: boolean })[HTTP_QUEUED] = true;
+  const token = localStorage.getItem('qn_access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+function releaseIfQueued(config: unknown): void {
+  if (config && typeof config === 'object' && (config as { [HTTP_QUEUED]?: boolean })[HTTP_QUEUED]) {
+    releaseHttpSlot();
+  }
+}
+
+client.interceptors.response.use(
+  (response) => {
+    releaseIfQueued(response.config);
+    return response;
+  },
+  (error) => {
+    releaseIfQueued(error?.config);
+    const status = error?.response?.status;
+    const url = String(error?.config?.url || '');
+    if (status === 401 && !url.includes('/api/auth/login')) {
+      localStorage.removeItem('qn_access_token');
+      localStorage.removeItem('qn_user');
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export async function fetchHome(project: number, environment: number): Promise<HomeData> {
-  const { data } = await client.get<HomeData>('/api/connections/home', {
-    params: { project, environment },
+  return coalesceGet('/api/connections/home', { project, environment }, async () => {
+    const { data } = await client.get<HomeData>('/api/connections/home', {
+      params: { project, environment },
+    });
+    return data;
   });
-  return data;
 }
 
 export const FILTER_EMPTY = 0;
@@ -218,7 +267,15 @@ export async function fetchK8sAlarmMonitorServices(
 ): Promise<K8sAlarmMonitorService[]> {
   const { data } = await client.get<K8sAlarmMonitorService[]>(
     `/api/k8s/clusters/${clusterId}/alarm-monitor/groups/${encodeURIComponent(namespace)}/services`,
-    { timeout: 60000 },
+  );
+  return data;
+}
+
+export async function resolveConnectionK8sAlarmCluster(
+  connectionId: number,
+): Promise<{ cluster_id: number; cluster_name: string }> {
+  const { data } = await client.get<{ cluster_id: number; cluster_name: string }>(
+    `/api/connections/${connectionId}/k8s-alarm-cluster`,
   );
   return data;
 }
@@ -525,8 +582,10 @@ export async function fetchLogs(params?: {
   source_type?: string;
   limit?: number;
 }): Promise<ActivityLog[]> {
-  const { data } = await client.get<ActivityLog[]>('/api/logs', { params });
-  return data;
+  return coalesceGet('/api/logs', params, async () => {
+    const { data } = await client.get<ActivityLog[]>('/api/logs', { params });
+    return data;
+  });
 }
 
 export async function markLogRead(id: number): Promise<ActivityLog> {
@@ -543,8 +602,10 @@ export async function fetchSubscriptions(params?: {
   project?: number;
   enabled?: boolean;
 }): Promise<GitlabSubscriptionTree[]> {
-  const { data } = await client.get<GitlabSubscriptionTree[]>('/api/subscriptions', { params });
-  return data;
+  return coalesceGet('/api/subscriptions', params, async () => {
+    const { data } = await client.get<GitlabSubscriptionTree[]>('/api/subscriptions', { params });
+    return data;
+  });
 }
 
 export async function updateSubscription(
@@ -563,21 +624,47 @@ export async function updateSubscription(
 
 export interface NotifyWebSocketHandle {
   close: () => void;
+  updateSubscription?: (options?: { project?: number | null; environment?: number | null }) => void;
 }
 
 const NOTIFY_WS_RECONNECT_MS = 3000;
 
-export function createLogsWebSocket(onMessage: (log: ActivityLog) => void): NotifyWebSocketHandle {
-  return createNotifyWebSocket({ onLog: onMessage });
+export function createLogsWebSocket(
+  onMessage: (log: ActivityLog) => void,
+  options?: { project?: number | null; environment?: number | null },
+): NotifyWebSocketHandle {
+  return createNotifyWebSocket({ onLog: onMessage }, options);
 }
 
-export function createNotifyWebSocket(handlers: {
-  onLog?: (log: ActivityLog) => void;
-  onK8sAlarm?: (event: K8sAlarmEvent) => void;
-}): NotifyWebSocketHandle {
+export function createNotifyWebSocket(
+  handlers: {
+    onLog?: (log: ActivityLog) => void;
+    onK8sAlarm?: (event: K8sAlarmEvent) => void;
+  },
+  options?: { project?: number | null; environment?: number | null },
+): NotifyWebSocketHandle {
   let ws: WebSocket | null = null;
   let disposed = false;
   let reconnectTimer: number | undefined;
+  let subscribeOptions = options;
+
+  const sendSubscribe = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const project = subscribeOptions?.project;
+    const environment = subscribeOptions?.environment;
+    if (project == null || environment == null) {
+      return;
+    }
+    ws.send(
+      JSON.stringify({
+        type: 'subscribe',
+        project,
+        environment,
+      }),
+    );
+  };
 
   const dispatch = (event: MessageEvent) => {
     try {
@@ -598,6 +685,9 @@ export function createNotifyWebSocket(handlers: {
       return;
     }
     ws = new WebSocket(buildLogsWebSocketUrl());
+    ws.onopen = () => {
+      sendSubscribe();
+    };
     ws.onmessage = dispatch;
     ws.onclose = () => {
       ws = null;
@@ -638,6 +728,10 @@ export function createNotifyWebSocket(handlers: {
       ws?.close();
       ws = null;
     },
+    updateSubscription(next?: { project?: number | null; environment?: number | null }) {
+      subscribeOptions = next;
+      sendSubscribe();
+    },
   };
 }
 
@@ -671,13 +765,40 @@ export async function markK8sAlarmEventsReadAll(clusterId: number): Promise<numb
   return data.updated;
 }
 
-export async function fetchDictItems(type?: DictType): Promise<DictItem[]> {
-  const { data } = await client.get<DictItem[]>('/api/dict', { params: type ? { type } : {} });
-  return data;
+export async function fetchDictItems(
+  type?: DictType,
+  options?: { force?: boolean },
+): Promise<DictItem[]> {
+  const force = options?.force ?? false;
+  if (!force) {
+    const cached = getCachedDictItems(type);
+    if (cached) {
+      return cached;
+    }
+    const pending = getInflightDictRequest(type);
+    if (pending) {
+      return pending;
+    }
+  }
+
+  const request = client
+    .get<DictItem[]>('/api/dict', { params: type ? { type } : {} })
+    .then(({ data }) => {
+      setCachedDictItems(type, data);
+      return data;
+    });
+
+  if (!force) {
+    trackInflightDictRequest(type, request);
+  }
+
+  return request;
 }
 
 export async function createDictItem(payload: DictFormValues): Promise<DictItem> {
   const { data } = await client.post<DictItem>('/api/dict', payload);
+  invalidateDictCache(payload.type);
+  invalidateDictCache();
   return data;
 }
 
@@ -686,20 +807,33 @@ export async function updateDictItem(
   payload: Partial<DictFormValues>,
 ): Promise<DictItem> {
   const { data } = await client.patch<DictItem>(`/api/dict/${id}`, payload);
+  if (payload.type) {
+    invalidateDictCache(payload.type);
+  } else {
+    invalidateDictCache();
+  }
   return data;
 }
 
 export async function deleteDictItem(id: number): Promise<void> {
   await client.delete(`/api/dict/${id}`);
+  invalidateDictCache();
 }
 
 export async function fetchPublicConfig(): Promise<PublicConfig> {
-  const { data } = await client.get<PublicConfig>('/api/public/config');
-  return data;
+  return coalesceGet('/api/public/config', undefined, async () => {
+    const { data } = await client.get<PublicConfig>('/api/public/config');
+    return data;
+  });
 }
 
 export async function fetchOmnidbMenuUrl(): Promise<{ url: string }> {
   const { data } = await client.get<{ url: string }>('/api/public/omnidb-menu-url');
+  return data;
+}
+
+export async function fetchRedisinsightMenuUrl(): Promise<{ url: string }> {
+  const { data } = await client.get<{ url: string }>('/api/public/redisinsight-menu-url');
   return data;
 }
 
@@ -784,11 +918,13 @@ export async function fetchApiMonitorFilterOptions(params?: {
   project?: number;
   environment?: number;
 }) {
-  const { data } = await client.get<import('../types/apiMonitor').ApiMonitorFilterOptions>(
-    '/api/api-monitor/filter-options',
-    { params },
-  );
-  return data;
+  return coalesceGet('/api/api-monitor/filter-options', params, async () => {
+    const { data } = await client.get<import('../types/apiMonitor').ApiMonitorFilterOptions>(
+      '/api/api-monitor/filter-options',
+      { params },
+    );
+    return data;
+  });
 }
 
 export async function fetchApiMonitorServices(params?: {
@@ -1098,4 +1234,72 @@ export async function togglePromptTemplate(id: string, enabled: boolean) {
 
 export async function deletePromptTemplate(id: string) {
   await client.delete(`/api/prompts/${id}`);
+}
+
+export async function login(username: string, password: string) {
+  const { data } = await client.post<import('../types/auth').AuthLoginResult>('/api/auth/login', {
+    username,
+    password,
+  });
+  return data;
+}
+
+export async function logout() {
+  await client.post('/api/auth/logout');
+}
+
+export async function fetchAuthMe() {
+  const { data } = await client.get<{ user: import('../types/auth').UserInfo }>('/api/auth/me');
+  return data.user;
+}
+
+export async function fetchMenuPermissions() {
+  const { data } = await client.get<import('../types/auth').MenuPermissionNode[]>(
+    '/api/menu-permissions',
+  );
+  return data;
+}
+
+export async function fetchUsers() {
+  const { data } = await client.get<import('../types/auth').UserInfo[]>('/api/users');
+  return data;
+}
+
+export async function createUser(payload: import('../types/auth').UserFormValues) {
+  const { data } = await client.post<import('../types/auth').UserInfo>('/api/users', payload);
+  return data;
+}
+
+export async function updateUser(
+  id: number,
+  payload: Partial<import('../types/auth').UserFormValues>,
+) {
+  const { data } = await client.put<import('../types/auth').UserInfo>(`/api/users/${id}`, payload);
+  return data;
+}
+
+export async function deleteUser(id: number) {
+  await client.delete(`/api/users/${id}`);
+}
+
+export async function fetchOperationLogs(params?: {
+  keyword?: string;
+  action?: string;
+  username?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const { data } = await client.get<{
+    items: import('../types/auth').OperationLogItem[];
+    total: number;
+  }>('/api/operation-logs', { params });
+  return data;
+}
+
+export async function reportPageOpen(menuKey: string) {
+  await client.post('/api/operation-logs/report', {
+    action: 'open',
+    menu_key: menuKey,
+    content: '',
+  });
 }

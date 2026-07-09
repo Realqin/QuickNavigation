@@ -9,6 +9,16 @@ from app.models import Connection
 LOCAL_HOST_ALIASES = {"localhost", "127.0.0.1", "0.0.0.0"}
 
 
+def resolve_sshwifty_scheme(request_host: str | None = None) -> str:
+    configured = settings.sshwifty_public_scheme.strip().lower()
+    if configured in {"http", "https"}:
+        return configured
+    hostname = (request_host or "").split(":")[0].strip().lower()
+    if hostname in LOCAL_HOST_ALIASES:
+        return "http"
+    return "https"
+
+
 def resolve_terminal_host(host: str | None) -> str:
     normalized = (host or "").strip().lower()
     if normalized in LOCAL_HOST_ALIASES:
@@ -17,17 +27,17 @@ def resolve_terminal_host(host: str | None) -> str:
 
 
 def build_sshwifty_public_base(request_host: str | None = None) -> str:
+    scheme = resolve_sshwifty_scheme(request_host)
     if request_host:
         hostname = request_host.split(":")[0].strip()
         if hostname:
-            return f"http://{hostname}:{settings.sshwifty_public_port}"
+            return f"{scheme}://{hostname}:{settings.sshwifty_public_port}"
     configured = settings.public_webhook_base_url.strip()
     if configured:
         parsed = urlparse(configured)
         if parsed.hostname and parsed.hostname not in LOCAL_HOST_ALIASES:
-            scheme = parsed.scheme or "http"
             return f"{scheme}://{parsed.hostname}:{settings.sshwifty_public_port}"
-    return f"http://localhost:{settings.sshwifty_public_port}"
+    return f"{scheme}://localhost:{settings.sshwifty_public_port}"
 
 
 def _encode_launch_password(password: str) -> str:

@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REDPANDA_DATA_DIR = _PROJECT_ROOT / "docker" / "redpanda" / "data"
+_KAFKA_UI_DATA_DIR = _PROJECT_ROOT / "docker" / "kafka-ui" / "data"
 
 
 class Settings(BaseSettings):
@@ -24,9 +25,12 @@ class Settings(BaseSettings):
     omnidb_mysql_host: str = "127.0.0.1"
     omnidb_db_path: str = ""
     sshwifty_public_port: int = 8182
+    sshwifty_public_scheme: str = ""
     sshwifty_ssh_host: str = "host.docker.internal"
     redpanda_public_port: int = 8082
     redpanda_kafka_host: str = "host.docker.internal"
+    # redpanda：本地 Redpanda Console；kafka-ui：线上 ARM Kafka UI
+    kafka_console_provider: str = "redpanda"
     redpanda_config_path: str = str(_REDPANDA_DATA_DIR / "console-config.yml")
     redpanda_clusters_manifest_path: str = str(_REDPANDA_DATA_DIR / "clusters-manifest.yml")
     redpanda_reload_wait_seconds: float = 3.0
@@ -34,6 +38,11 @@ class Settings(BaseSettings):
     redisinsight_public_port: int = 5540
     redisinsight_redis_host: str = "127.0.0.1"
     api_repo_cache_dir: str = str(_PROJECT_ROOT / "data" / "api-repos")
+    jwt_secret: str = "change-me-jwt-secret-in-production"
+    jwt_expire_hours: int = 24
+    default_admin_username: str = "admin"
+    default_admin_password: str = "admin123"
+    default_admin_nickname: str = "管理员"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

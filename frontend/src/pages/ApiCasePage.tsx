@@ -25,6 +25,7 @@ import {
 } from '../api';
 import ApiCaseFormModal from '../components/ApiCaseFormModal';
 import { useDictGroup } from '../hooks/useDict';
+import { useTabWorkspaceFilter } from '../hooks/useTabWorkspaceFilter';
 import { formatCaseHeadersDisplay, formatCaseRequestParamsDisplay } from '../utils/caseRequestParts';
 import { renderCaseExecuteStatusCell } from '../utils/caseExecuteStatus';
 import { showApiError } from '../utils/apiError';
@@ -59,6 +60,7 @@ function ellipsisCell(value?: string | null, width = 180) {
 
 export default function ApiCasePage() {
   const { projects, environments } = useDictGroup();
+  const { project, environment, setWorkspace, globalVersion } = useTabWorkspaceFilter('apiCases');
   const [form] = Form.useForm<FilterValues>();
 
   const [data, setData] = useState<ApiTestCase[]>([]);
@@ -71,6 +73,20 @@ export default function ApiCasePage() {
   const [editing, setEditing] = useState<ApiTestCase | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+
+  useEffect(() => {
+    form.setFieldsValue({
+      project_id: project ?? undefined,
+      environment_id: environment ?? undefined,
+    });
+    setPage(1);
+    setSelectedRowKeys([]);
+    setFilters((prev) => ({
+      ...prev,
+      project_id: project ?? undefined,
+      environment_id: environment ?? undefined,
+    }));
+  }, [environment, form, globalVersion, project]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -188,9 +204,11 @@ export default function ApiCasePage() {
   }, [loadData, selectedRowKeys]);
 
   const applyFilters = () => {
+    const values = form.getFieldsValue();
+    setWorkspace(values.project_id, values.environment_id);
     setPage(1);
     setSelectedRowKeys([]);
-    setFilters(form.getFieldsValue());
+    setFilters(values);
   };
 
   const selectedRows = useMemo(

@@ -10,12 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine, SessionLocal
-from app.models import Connection, DictItem, EmbedConsoleSession
+from app.models import Connection, DictItem, EmbedConsoleSession, User
 from app.mqtt_bridge_service import run_mqtt_bridge, run_mqtt_bridge_session
 from app.k8s_alarm_scheduler import k8s_alarm_scheduler
 from app.ping_scheduler import connection_ping_scheduler
 from app.schema_monitor_scheduler import schema_monitor_scheduler
-from app.routers import api, webhooks
+from app.routers import api, auth_users, webhooks
 from app.services import (
     DICT_CONNECTION_GROUP,
     DICT_ENVIRONMENT,
@@ -31,6 +31,7 @@ from app.services import (
     PROJECT_CONNECTION_GROUP_NAME,
     connection_is_mqtt_type,
 )
+from app.auth_middleware import AuthAuditMiddleware
 from app.k8s_exec_service import run_k8s_exec_bridge
 from app.k8s_monitor_service import get_k8s_cluster
 from app.websocket_manager import ws_manager
@@ -68,14 +69,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="QuickNavigation API", version="1.0.0", lifespan=lifespan)
 
 origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+allow_all_origins = origins == ["*"]
+app.add_middleware(AuthAuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins != ["*"] else ["*"],
+    allow_origins=[] if allow_all_origins else origins,
+    allow_origin_regex=".*" if allow_all_origins else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth_users.router)
 app.include_router(api.router)
 app.include_router(webhooks.router)
 
@@ -107,12 +112,12 @@ def seed_dict_items(db) -> None:
     if db.query(DictItem).count() > 0:
         return
     seeds = [
-        (DICT_PROJECT, "默认项目", "系统默认项目", 0),
-        (DICT_PROJECT, "订单服务", "订单微服务项目", 1),
-        (DICT_ENVIRONMENT, "开发环境", None, 0),
-        (DICT_ENVIRONMENT, "测试环境", None, 1),
-        (DICT_ENVIRONMENT, "预发环境", None, 2),
-        (DICT_ENVIRONMENT, "生产环境", None, 3),
+        (DICT_PROJECT, "默认项目", "系统默认项目", 0, True),
+        (DICT_PROJECT, "订单服务", "订单微服务项目", 1, False),
+        (DICT_ENVIRONMENT, "开发环境", None, 0, True),
+        (DICT_ENVIRONMENT, "测试环境", None, 1, True),
+        (DICT_ENVIRONMENT, "预发环境", None, 2, True),
+        (DICT_ENVIRONMENT, "生产环境", None, 3, True),
         (DICT_LABEL, LABEL_OTHER, "普通跳转连接", 0, True),
         (DICT_LABEL, "GitHub 仓库", "GitHub 代码仓库", 1, False),
         (DICT_LABEL, "GitLab 仓库", "GitLab 代码仓库", 2, True),
@@ -342,8 +347,8 @@ def _dict_id(db, dict_type: str, name: str) -> int:
 def seed_connections(db) -> None:
     if db.query(Connection).count() > 0:
         return
-    normal = _dict_id(db, DICT_LABEL, "普通连接")
-    database = _dict_id(db, DICT_LABEL, "数据库")
+    normal = _dict_id(db, DICT_LABEL, LABEL_OTHER)
+    database = _dict_id(db, DICT_LABEL, LABEL_DATABASE)
     github = _dict_id(db, DICT_LABEL, "GitHub 仓库")
     order_service = _dict_id(db, DICT_PROJECT, "订单服务")
     test_env = _dict_id(db, DICT_ENVIRONMENT, "测试环境")
@@ -588,6 +593,30 @@ def migrate_subscription_link_enabled() -> None:
         )
 
 
+def migrate_subscription_enabled_legacy_defaults() -> None:
+    """一次性将已有订阅标记为启用，与改造前日志订阅页可见性保持一致。"""
+    inspector = inspect(engine)
+    if not inspector.has_table("subscriptions"):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS app_migration_flags (name VARCHAR(64) PRIMARY KEY)"
+            )
+        )
+        flag = conn.execute(
+            text("SELECT 1 FROM app_migration_flags WHERE name = 'subscription_enabled_legacy'")
+        ).first()
+        if flag:
+            return
+        conn.execute(text("UPDATE subscriptions SET enabled = 1 WHERE enabled = 0"))
+        conn.execute(
+            text(
+                "INSERT INTO app_migration_flags (name) VALUES ('subscription_enabled_legacy')"
+            )
+        )
+
+
 def migrate_dict_is_system() -> None:
     inspector = inspect(engine)
     if not inspector.has_table("dict_items"):
@@ -824,6 +853,36 @@ def migrate_k8s_cluster_name() -> None:
         conn.execute(text("ALTER TABLE k8s_cluster_configs ADD COLUMN cluster_name VARCHAR(128) NULL"))
 
 
+def migrate_user_password_plain() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("users"):
+        return
+    cols = {column["name"] for column in inspector.get_columns("users")}
+    if "password_plain" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN password_plain VARCHAR(128) NULL"))
+
+
+def seed_default_admin(db) -> None:
+    from app.auth import hash_password
+    from app.menu_permissions import all_menu_keys
+
+    if db.query(User).count() > 0:
+        return
+    admin = User(
+        username=settings.default_admin_username,
+        nickname=settings.default_admin_nickname,
+        password_hash=hash_password(settings.default_admin_password),
+        password_plain=settings.default_admin_password,
+        menu_permissions=all_menu_keys(),
+        is_admin=True,
+        is_active=True,
+    )
+    db.add(admin)
+    db.commit()
+
+
 def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
@@ -839,6 +898,7 @@ def init_db() -> None:
     migrate_drop_dict_name_unique()
     migrate_subscription_github_branch()
     migrate_subscription_link_enabled()
+    migrate_subscription_enabled_legacy_defaults()
     migrate_connection_endpoint_fields()
     migrate_mqtt_fields()
     migrate_embed_console_sessions()
@@ -852,6 +912,7 @@ def init_db() -> None:
     migrate_k8s_alarm_exception_columns()
     migrate_k8s_cluster_connection_id()
     migrate_k8s_cluster_name()
+    migrate_user_password_plain()
     migrate_repo_access_ssh_key()
     db = SessionLocal()
     try:
@@ -877,6 +938,7 @@ def init_db() -> None:
         from app.repo_access_service import sync_repo_access_cache_from_db
 
         sync_repo_access_cache_from_db(db)
+        seed_default_admin(db)
     finally:
         db.close()
 
@@ -891,8 +953,17 @@ async def websocket_logs(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            payload = await websocket.receive_json()
+            if payload.get("type") == "subscribe":
+                ws_manager.set_subscription(
+                    websocket,
+                    project=payload.get("project"),
+                    environment=payload.get("environment"),
+                )
+                await websocket.send_json({"type": "subscribed", "ok": True})
     except WebSocketDisconnect:
+        pass
+    except Exception:
         pass
     finally:
         ws_manager.disconnect(websocket)

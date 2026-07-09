@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.console_temp import TEMP_EXTERNAL_ALIAS_PREFIX
 from app.models import Connection, EmbedConsoleSession
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ SESSION_STATUS_CLOSED = "closed"
 
 def build_temp_external_alias(session_id: str, connection_name: str) -> str:
     short = session_id.replace("-", "")[:8]
-    return f"__qn_tmp_{short}__{connection_name}"
+    return f"{TEMP_EXTERNAL_ALIAS_PREFIX}{short}__{connection_name}"
 
 
 def create_embed_session(
@@ -128,3 +129,65 @@ def _cleanup_external_session(session: EmbedConsoleSession) -> None:
         return
 
     # terminal / mqtt: 无外部持久实体，仅记录会话状态
+
+
+def _active_temporary_external_ids(db: Session, console_type: str) -> set[str]:
+    rows = (
+        db.query(EmbedConsoleSession.external_id)
+        .filter(
+            EmbedConsoleSession.status == SESSION_STATUS_ACTIVE,
+            EmbedConsoleSession.is_temporary.is_(True),
+            EmbedConsoleSession.console_type == console_type,
+            EmbedConsoleSession.external_id.isnot(None),
+        )
+        .all()
+    )
+    return {str(row[0]) for row in rows if row[0]}
+
+
+def purge_orphan_temporary_external_connections(db: Session) -> None:
+    """清理 OmniDB / RedisInsight 中已无活跃会话的临时连接。"""
+    from app.omnidb_service import purge_orphan_temporary_omnidb_connections
+    from app.redisinsight_service import purge_orphan_temporary_redisinsight_databases
+
+    keep_db = _active_temporary_external_ids(db, CONSOLE_DATABASE)
+    keep_redis = _active_temporary_external_ids(db, CONSOLE_REDIS)
+    keep_omnidb_ids = {int(item) for item in keep_db if item.isdigit()}
+    try:
+        purge_orphan_temporary_omnidb_connections(keep_omnidb_ids)
+    except Exception as exc:
+        logger.warning("purge omnidb temporary connections failed: %s", exc)
+    try:
+        purge_orphan_temporary_redisinsight_databases(keep_redis)
+    except Exception as exc:
+        logger.warning("purge redisinsight temporary connections failed: %s", exc)
+
+
+def purge_temporary_connections_for_connection_method_menu(db: Session, console_type: str) -> None:
+    """连接方式菜单：关闭全部临时 embed 会话并删除外部控制台中的临时连接。"""
+    from app.omnidb_service import purge_orphan_temporary_omnidb_connections
+    from app.redisinsight_service import purge_orphan_temporary_redisinsight_databases
+
+    active_sessions = (
+        db.query(EmbedConsoleSession)
+        .filter(
+            EmbedConsoleSession.status == SESSION_STATUS_ACTIVE,
+            EmbedConsoleSession.is_temporary.is_(True),
+            EmbedConsoleSession.console_type == console_type,
+        )
+        .all()
+    )
+    for session in list(active_sessions):
+        close_embed_session(db, session.id)
+
+    try:
+        if console_type == CONSOLE_DATABASE:
+            purge_orphan_temporary_omnidb_connections(set())
+        elif console_type == CONSOLE_REDIS:
+            purge_orphan_temporary_redisinsight_databases(set())
+    except Exception as exc:
+        logger.warning(
+            "purge menu temporary connections failed (%s): %s",
+            console_type,
+            exc,
+        )

@@ -1,0 +1,11 @@
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io"
+  ],
+  "proxies": {
+    "http-proxy": "http://host.docker.internal:10808",
+    "https-proxy": "http://host.docker.internal:10808",
+    "no-proxy": "localhost,127.0.0.1"
+  }
+}

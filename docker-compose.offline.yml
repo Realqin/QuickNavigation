@@ -1,0 +1,26 @@
+# 离线部署覆盖：只使用本地已有镜像，不尝试从远端拉取
+# 用法：docker compose -f docker-compose.yml -f docker-compose.offline.yml up -d
+
+services:
+  mysql:
+    pull_policy: never
+  omnidb-app:
+    pull_policy: never
+  omnidb:
+    pull_policy: never
+  sshwifty-app:
+    pull_policy: never
+  sshwifty:
+    pull_policy: never
+  redpanda-console:
+    pull_policy: never
+  kafka-ui:
+    pull_policy: never
+  redisinsight-app:
+    pull_policy: never
+  redisinsight:
+    pull_policy: never
+  backend:
+    pull_policy: never
+  frontend:
+    pull_policy: never

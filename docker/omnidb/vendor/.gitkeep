@@ -1,0 +1,3 @@
+# OmniDB 源码包（离线构建用）
+# 生成方式：powershell -ExecutionPolicy Bypass -File scripts/docker/prepare-omnidb-vendor.ps1
+# 文件名须为 OmniDB-3.0.3b.tar.gz

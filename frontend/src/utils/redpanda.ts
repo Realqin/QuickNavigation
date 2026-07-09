@@ -1,13 +1,12 @@
-import { buildEmbedSessionPageUrl } from './embedSession';
+import { resolveConsoleProxyUrl } from './consoleProxy';
 
-const DEFAULT_REDPANDA_PORT = 8082;
+const KAFKA_PROXY_PREFIX = '/proxy/kafka';
 
-export function resolveRedpandaOpenUrl(embedUrl: string, port = DEFAULT_REDPANDA_PORT): string {
-  const target = new URL(embedUrl);
-  target.protocol = window.location.protocol;
-  target.hostname = window.location.hostname;
-  target.port = String(port);
-  return target.toString();
+/** Kafka UI 走 8080 同源代理（客户端常无法直连 8082）。 */
+export function resolveRedpandaOpenUrl(embedUrl: string): string {
+  const url = resolveConsoleProxyUrl(embedUrl, KAFKA_PROXY_PREFIX);
+  // 必须带尾部 /，否则 nginx 无法匹配 /proxy/kafka/ 会落到 SPA 首页
+  return url.endsWith('/') ? url : `${url}/`;
 }
 
 export async function openRedpandaInNewTab(
@@ -18,9 +17,7 @@ export async function openRedpandaInNewTab(
   connectionId: number,
 ): Promise<void> {
   const data = await openConsole(connectionId, window.location.hostname);
-  const url = data.session_id
-    ? buildEmbedSessionPageUrl(data.session_id)
-    : resolveRedpandaOpenUrl(data.embed_url);
+  const url = resolveRedpandaOpenUrl(data.embed_url);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
     throw new Error('browser blocked popup');

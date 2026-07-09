@@ -3,6 +3,7 @@ import { Button, Modal, Spin, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { openOmnidbConsole } from '../api';
 import { showApiError } from '../utils/apiError';
+import { resolveOmnidbOpenUrl } from '../utils/omnidb';
 
 interface Props {
   open: boolean;
@@ -33,7 +34,7 @@ export default function OmnidbConsoleModal({
     openOmnidbConsole(connectionId)
       .then((data) => {
         if (cancelled) return;
-        setEmbedUrl(data.embed_url);
+        setEmbedUrl(resolveOmnidbOpenUrl(data.embed_url));
         setTitle(data.connection_name || connectionName || '数据库控制台');
       })
       .catch((error) => {

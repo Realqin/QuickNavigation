@@ -1,0 +1,13 @@
+Django==3.2.25
+CherryPy==18.8.0
+social-auth-app-django==5.4.0
+django-auth-ldap==4.6.0
+pyscrypt
+pyaes
+openpyxl
+sshtunnel
+psycopg2-binary
+RestrictedPython
+PyMySQL
+sqlparse
+pgspecial

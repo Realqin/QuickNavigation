@@ -1,11 +1,10 @@
 import { ApiOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, InputNumber, Modal, Select, message } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, Switch, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { testConnection } from '../api';
 import type { Connection, ConnectionFormValues, DictItem } from '../types';
 import {
   DEFAULT_PORTS,
-  LABEL_KAFKA,
   resolveConnectionKind,
   supportsConnectionTest,
   type ConnectionKind,
@@ -37,6 +36,12 @@ interface Props {
   defaultGroupId?: number;
   onCancel: () => void;
   onSubmit: (values: ConnectionFormValues) => Promise<void>;
+}
+
+const SUBSCRIPTION_KINDS: ConnectionKind[] = ['gitlab', 'database', 'k8s'];
+
+function supportsLogSubscription(kind: ConnectionKind): boolean {
+  return SUBSCRIPTION_KINDS.includes(kind);
 }
 
 const formLayout = {
@@ -419,10 +424,10 @@ export default function ConnectionFormModal({
           database_name: connection.database_name ?? undefined,
           mqtt_ws_path: connection.mqtt_ws_path ?? '/mqtt',
           mqtt_subscriptions: connection.mqtt_subscriptions ?? [],
+          subscription_enabled: connection.subscription_enabled ?? false,
         });
       } else {
-        const kafkaTypeId = labelItems.find((item) => item.name === LABEL_KAFKA)?.id;
-        const initialType = defaultType ?? kafkaTypeId ?? labelOptions[0]?.value;
+        const initialType = defaultType ?? labelOptions[0]?.value;
         const initialKind = resolveConnectionKind(initialType, labelItems);
         form.resetFields();
         form.setFieldsValue({
@@ -443,6 +448,7 @@ export default function ConnectionFormModal({
           mqtt_ws_path: '/mqtt',
           host: initialKind === 'kafka' ? '' : undefined,
           port: initialKind === 'kafka' ? undefined : DEFAULT_PORTS[initialKind],
+          subscription_enabled: false,
         });
       }
     }
@@ -617,7 +623,14 @@ export default function ConnectionFormModal({
       destroyOnHidden
       width={modalWidth}
       className="connection-form-modal"
-      styles={{ body: { paddingTop: 16, paddingBottom: 12 } }}
+      styles={{
+        body: {
+          paddingTop: 16,
+          paddingBottom: 12,
+          maxHeight: 'calc(100vh - 200px)',
+          overflowY: 'auto',
+        },
+      }}
     >
       <Form
         form={form}
@@ -640,6 +653,17 @@ export default function ConnectionFormModal({
             handleTest().catch(() => undefined);
           }}
         />
+
+        {supportsLogSubscription(connectionKind) ? (
+          <Form.Item
+            name="subscription_enabled"
+            label="启用订阅"
+            valuePropName="checked"
+            className="connection-form-modal__subscription-item"
+          >
+            <Switch size="small" />
+          </Form.Item>
+        ) : null}
 
         <div className="connection-form-modal__section">
         <Form.Item name="group_id" label="分组" rules={[{ required: true, message: '请选择分组' }]}>

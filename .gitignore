@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.pytest_cache/
 
 # Node
 node_modules/
@@ -16,3 +17,9 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# 运行时缓存（接口调试拉取的 Git 仓库，勿提交）
+data/api-repos/
+
+# 离线镜像包与部署物料（体积大，勿提交）
+offline/

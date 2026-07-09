@@ -1,14 +1,6 @@
-import axios from 'axios';
 import type { MqttConsoleConfig } from '../../types';
-
-const client = axios.create({
-  baseURL: '/',
-  timeout: 15000,
-});
+import { fetchMqttConsoleConfig } from '../../api';
 
 export async function fetchMqttConfig(connectionId: number): Promise<MqttConsoleConfig> {
-  const { data } = await client.get<MqttConsoleConfig>(
-    `/api/connections/${connectionId}/mqtt-config`,
-  );
-  return data;
+  return fetchMqttConsoleConfig(connectionId);
 }

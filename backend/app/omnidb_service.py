@@ -8,6 +8,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import settings
+from app.console_temp import is_temp_external_alias
 from app.models import Connection
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def _login_omnidb(client: httpx.Client) -> None:
     client.get("/").raise_for_status()
 
 
-def _find_connection_id_by_alias(client: httpx.Client, alias: str) -> int:
+def _list_omnidb_connections(client: httpx.Client) -> list[dict]:
     csrf = _extract_csrf_token(client)
     response = client.post(
         "/get_connections/",
@@ -101,8 +102,47 @@ def _find_connection_id_by_alias(client: httpx.Client, alias: str) -> int:
     payload = response.json()
     if payload.get("v_error"):
         raise HTTPException(status_code=502, detail=f"OmniDB 查询连接失败：{payload.get('v_data')}")
+    return list((payload.get("v_data") or {}).get("v_conn_list", []))
 
-    for item in (payload.get("v_data") or {}).get("v_conn_list", []):
+
+def purge_orphan_temporary_omnidb_connections(keep_ids: set[int] | None = None) -> int:
+    """删除 OmniDB 中无活跃会话的 __qn_tmp_* 临时连接。"""
+    if not settings.omnidb_internal_url:
+        return 0
+    keep = keep_ids or set()
+    removed = 0
+    with httpx.Client(
+        base_url=settings.omnidb_internal_url.rstrip("/"),
+        follow_redirects=True,
+        timeout=30,
+    ) as client:
+        _login_omnidb(client)
+        for item in _list_omnidb_connections(client):
+            alias = str(item.get("alias") or "")
+            conn_id = int(item.get("id") or 0)
+            if conn_id <= 0 or not is_temp_external_alias(alias):
+                continue
+            if conn_id in keep:
+                continue
+            csrf = _extract_csrf_token(client)
+            response = client.post(
+                "/delete_connection/",
+                data={"data": json.dumps({"id": conn_id})},
+                headers={"X-CSRFToken": csrf, "Referer": settings.omnidb_internal_url},
+            )
+            response.raise_for_status()
+            body = response.json()
+            if body.get("v_error"):
+                logger.warning("omnidb delete temp connection %s failed: %s", conn_id, body.get("v_data"))
+                continue
+            removed += 1
+    if removed:
+        logger.info("purged %s orphan omnidb temporary connections", removed)
+    return removed
+
+
+def _find_connection_id_by_alias(client: httpx.Client, alias: str) -> int:
+    for item in _list_omnidb_connections(client):
         if item.get("alias") == alias and item.get("technology") == "mysql":
             return int(item["id"])
     return -1

@@ -1,6 +1,8 @@
 kafka:
   brokers:
-    - "host.docker.internal:9092"
+    - "10.100.0.211:9092"
+    - "10.100.0.212:9092"
+    - "10.100.0.213:9092"
   sasl:
     enabled: false
   tls:
@@ -11,3 +13,6 @@ kafka:
     retryInterval: 2s
     maxRetryInterval: 30s
     backoffMultiplier: 2
+redpanda:
+  adminApi:
+    enabled: false

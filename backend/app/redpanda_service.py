@@ -49,40 +49,95 @@ def _broker_endpoints_from_text(brokers_text: str) -> list[str]:
     return brokers
 
 
+def _render_kafka_ui_config_from_brokers(
+    brokers: list[str],
+    *,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    bootstrap = ",".join(brokers)
+    username = (username or "").strip()
+    password = (password or "").strip()
+    if username and password:
+        return f"""kafka:
+  clusters:
+    - name: quicknav
+      bootstrapServers: {bootstrap}
+      properties:
+        security.protocol: SASL_PLAINTEXT
+        sasl.mechanism: SCRAM-SHA-256
+      sasl:
+        mechanism: SCRAM-SHA-256
+        username: {_yaml_quote(username)}
+        password: {_yaml_quote(password)}
+"""
+    return f"""kafka:
+  clusters:
+    - name: quicknav
+      bootstrapServers: {bootstrap}
+      properties:
+        security.protocol: PLAINTEXT
+"""
+
+
+def _render_redpanda_console_config_from_brokers(
+    brokers: list[str],
+    *,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    username = (username or "").strip()
+    password = (password or "").strip()
+    lines = ["kafka:", "  brokers:"]
+    for broker in brokers:
+        lines.append(f"    - {_yaml_quote(broker)}")
+    if username and password:
+        lines.extend(
+            [
+                "  sasl:",
+                "    enabled: true",
+                f"    username: {_yaml_quote(username)}",
+                f"    password: {_yaml_quote(password)}",
+                "    mechanism: SCRAM-SHA-256",
+            ]
+        )
+    else:
+        lines.extend(["  sasl:", "    enabled: false"])
+    lines.extend(
+        [
+            "  tls:",
+            "    enabled: false",
+            "  startup:",
+            "    establishConnectionEagerly: false",
+            "    maxRetries: 5",
+            "    retryInterval: 2s",
+            "    maxRetryInterval: 30s",
+            "    backoffMultiplier: 2",
+            "redpanda:",
+            "  adminApi:",
+            "    enabled: false",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _render_console_config_from_brokers(
     brokers: list[str],
     *,
     username: str | None = None,
     password: str | None = None,
 ) -> str:
-    broker_lines = "\n".join(f"    - {_yaml_quote(endpoint)}" for endpoint in brokers)
-    username = (username or "").strip()
-    password = (password or "").strip()
-    if username and password:
-        sasl_block = f"""  sasl:
-    enabled: true
-    mechanism: SCRAM-SHA-256
-    username: {_yaml_quote(username)}
-    password: {_yaml_quote(password)}"""
-    else:
-        sasl_block = """  sasl:
-    enabled: false"""
-    return f"""kafka:
-  brokers:
-{broker_lines}
-{sasl_block}
-  tls:
-    enabled: false
-  startup:
-    establishConnectionEagerly: false
-    maxRetries: 5
-    retryInterval: 2s
-    maxRetryInterval: 30s
-    backoffMultiplier: 2
-redpanda:
-  adminApi:
-    enabled: false
-"""
+    if settings.kafka_console_provider.strip().lower() == "kafka-ui":
+        return _render_kafka_ui_config_from_brokers(
+            brokers,
+            username=username,
+            password=password,
+        )
+    return _render_redpanda_console_config_from_brokers(
+        brokers,
+        username=username,
+        password=password,
+    )
 
 
 def _render_console_config(conn: Connection) -> str:
@@ -136,13 +191,13 @@ def _write_text_file(path: str, content: str) -> None:
         with open(path, encoding="utf-8") as handle:
             written = handle.read()
     except OSError as exc:
-        raise HTTPException(status_code=502, detail=f"Redpanda 配置写入失败：{exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Kafka 配置写入失败：{exc}") from exc
     if written != content:
         raise HTTPException(
             status_code=502,
-            detail=f"Redpanda 配置未写入预期路径：{path}",
+            detail=f"Kafka 配置未写入预期路径：{path}",
         )
-    logger.info("redpanda config updated: %s", path)
+    logger.info("kafka config updated: %s", path)
 
 
 def _list_kafka_connections(db: Session) -> list[Connection]:
@@ -218,11 +273,11 @@ def sync_kafka_console_clusters_manifest(db: Session) -> None:
 
 def sync_connection_to_redpanda(db: Session, conn: Connection) -> None:
     if not connection_is_kafka_type(db, conn):
-        raise HTTPException(status_code=400, detail="仅 Kafka 类型连接支持 Redpanda Console")
+        raise HTTPException(status_code=400, detail="仅 Kafka 类型连接支持 Kafka Console")
 
     config_path = settings.redpanda_config_path.strip()
     if not config_path:
-        raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
+        raise HTTPException(status_code=503, detail="Kafka Console 未配置")
 
     _write_text_file(config_path, _render_console_config(conn))
     sync_kafka_clusters_manifest(db)
@@ -253,7 +308,7 @@ def prepare_redpanda_open(
 def sync_kafka_console_to_redpanda(db: Session, conn: KafkaConsoleConnection) -> None:
     config_path = settings.redpanda_config_path.strip()
     if not config_path:
-        raise HTTPException(status_code=503, detail="Redpanda Console 未配置")
+        raise HTTPException(status_code=503, detail="Kafka Console 未配置")
 
     _write_text_file(config_path, _render_kafka_console_config(conn))
     sync_kafka_console_clusters_manifest(db)

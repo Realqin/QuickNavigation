@@ -5,6 +5,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import settings
+from app.console_temp import is_temp_external_alias
 from app.models import Connection
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,42 @@ def delete_redisinsight_database(database_id: str) -> None:
         response = client.delete(f"/api/databases/{database_id}")
         if response.status_code >= 400:
             _raise_redisinsight_error(response, action="删除连接")
+
+
+def purge_orphan_temporary_redisinsight_databases(keep_ids: set[str] | None = None) -> int:
+    """删除 RedisInsight 中无活跃会话的 __qn_tmp_* 临时连接。"""
+    base_url = settings.redisinsight_internal_url.rstrip("/")
+    if not base_url:
+        return 0
+    keep = keep_ids or set()
+    removed = 0
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        _ensure_eula_accepted(client)
+        response = client.get("/api/databases")
+        response.raise_for_status()
+        for item in response.json() or []:
+            name = str(item.get("name") or "")
+            database_id = str(item.get("id") or "")
+            if not database_id or not is_temp_external_alias(name):
+                continue
+            if database_id in keep:
+                continue
+            delete_response = client.delete(f"/api/databases/{database_id}")
+            if delete_response.status_code >= 400:
+                logger.warning(
+                    "redisinsight delete temp database %s failed: %s",
+                    database_id,
+                    delete_response.text.strip(),
+                )
+                continue
+            removed += 1
+    if removed:
+        logger.info("purged %s orphan redisinsight temporary connections", removed)
+    return removed
+
+
+def prepare_redisinsight_menu_url(*, public_base: str) -> str:
+    return f"{public_base.rstrip('/')}/"
 
 
 def prepare_redisinsight_open(

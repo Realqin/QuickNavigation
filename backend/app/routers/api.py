@@ -6,8 +6,14 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.database import get_db
+from app.auth import get_current_user
+from app.connection_permission_service import (
+    ensure_connection_access,
+    ensure_connection_type_permission,
+    filter_connections_for_user,
+)
+from app.models import Connection, DictItem, Subscription, User
 from app.repo_access_config import get_public_webhook_base_url
-from app.models import Connection, DictItem, Subscription
 from app.schemas import (
     ApiMonitorEndpointChangeOut,
     ApiMonitorEndpointOut,
@@ -48,6 +54,7 @@ from app.schemas import (
     BatchDeleteRequest,
     ConnectionCreate,
     ConnectionOut,
+    ConnectionK8sAlarmClusterOut,
     ConnectionTestOut,
     ConnectionTestRequest,
     ConnectionUpdate,
@@ -120,7 +127,8 @@ from app.embed_session_service import (
     close_embed_session,
     create_embed_session,
     get_active_embed_session,
-    update_embed_session,
+    purge_orphan_temporary_external_connections,
+    purge_temporary_connections_for_connection_method_menu,
 )
 from app.kafka_console_service import (
     create_kafka_console_connection,
@@ -173,7 +181,11 @@ from app.redpanda_service import (
     prepare_redpanda_open,
     snapshot_redpanda_console_config,
 )
-from app.redisinsight_service import build_redisinsight_public_base, prepare_redisinsight_open
+from app.redisinsight_service import (
+    build_redisinsight_public_base,
+    prepare_redisinsight_menu_url,
+    prepare_redisinsight_open,
+)
 from app.mqtt_service import prepare_mqtt_console_config
 from app.sshwifty_service import build_sshwifty_public_base, prepare_sshwifty_open
 from app.config import settings
@@ -222,11 +234,28 @@ from app.ping_scheduler import ping_connection_record
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+def _get_connection_or_404(db: Session, connection_id: int, user: User) -> Connection:
+    conn = db.query(Connection).filter(Connection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    ensure_connection_access(db, user, conn)
+    return conn
+
+
 @router.get("/public/omnidb-menu-url", response_model=OmnidbMenuUrlOut)
-def public_omnidb_menu_url(request: Request):
+def public_omnidb_menu_url(request: Request, db: Session = Depends(get_db)):
+    purge_temporary_connections_for_connection_method_menu(db, CONSOLE_DATABASE)
     host_hint = request.headers.get("host")
     public_base = build_omnidb_public_base(host_hint)
     return OmnidbMenuUrlOut(url=prepare_omnidb_menu_url(public_base=public_base))
+
+
+@router.get("/public/redisinsight-menu-url", response_model=OmnidbMenuUrlOut)
+def public_redisinsight_menu_url(request: Request, db: Session = Depends(get_db)):
+    purge_temporary_connections_for_connection_method_menu(db, CONSOLE_REDIS)
+    host_hint = request.headers.get("host")
+    public_base = build_redisinsight_public_base(host_hint)
+    return OmnidbMenuUrlOut(url=prepare_redisinsight_menu_url(public_base=public_base))
 
 
 @router.get("/public/config", response_model=PublicConfigOut)
@@ -241,6 +270,7 @@ def public_config(request: Request):
         sshwifty_base_url=build_sshwifty_public_base(host_hint),
         redpanda_base_url=build_redpanda_public_base(host_hint),
         redisinsight_base_url=build_redisinsight_public_base(host_hint),
+        kafka_console_provider=settings.kafka_console_provider,
     )
 
 
@@ -328,18 +358,21 @@ def get_connections(
     is_shared: bool | None = Query(None),
     group_id: int | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    return [
-        ConnectionOut.from_connection(conn)
-        for conn in list_connections(
+    connections = filter_connections_for_user(
+        db,
+        user,
+        list_connections(
             db,
             name=name,
             project=project,
             environment=environment,
             is_shared=is_shared,
             group_id=group_id,
-        )
-    ]
+        ),
+    )
+    return [ConnectionOut.from_connection(conn) for conn in connections]
 
 
 @router.get("/connections/home", response_model=HomeResponse)
@@ -347,6 +380,7 @@ def get_home_connections(
     project: int = Query(...),
     environment: int = Query(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     data = get_home_data(db, project, environment)
     return HomeResponse(
@@ -359,7 +393,8 @@ def get_home_connections(
                 "is_system": group["is_system"],
                 "is_project_group": group["is_project_group"],
                 "connections": [
-                    ConnectionOut.from_connection(conn) for conn in group["connections"]
+                    ConnectionOut.from_connection(conn)
+                    for conn in filter_connections_for_user(db, user, group["connections"])
                 ],
             }
             for group in data["groups"]
@@ -372,12 +407,22 @@ def get_home_connections(
 
 
 @router.post("/connections", response_model=ConnectionOut, status_code=201)
-def post_connection(data: ConnectionCreate, db: Session = Depends(get_db)):
+def post_connection(
+    data: ConnectionCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    ensure_connection_type_permission(db, user, data.type)
     return ConnectionOut.from_connection(create_connection(db, data))
 
 
 @router.post("/connections/test-connection", response_model=ConnectionTestOut)
-def post_test_connection(data: ConnectionTestRequest, db: Session = Depends(get_db)):
+def post_test_connection(
+    data: ConnectionTestRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    ensure_connection_type_permission(db, user, data.type)
     return test_connection(db, data)
 
 
@@ -406,10 +451,9 @@ def post_omnidb_open(
     request: Request,
     public_host: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_database_type(db, conn):
         raise HTTPException(status_code=400, detail="仅数据库类型连接支持 OmniDB")
     host_hint = public_host or request.headers.get("host")
@@ -439,10 +483,9 @@ def post_sshwifty_open(
     request: Request,
     public_host: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_terminal_type(db, conn):
         raise HTTPException(status_code=400, detail="仅终端模拟器类型连接支持 Sshwifty")
     host_hint = public_host or request.headers.get("host")
@@ -460,11 +503,10 @@ def post_redpanda_connect(
     request: Request,
     public_host: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """菜单入口：持久化同步集群配置，不创建临时会话。"""
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_kafka_type(db, conn):
         raise HTTPException(status_code=400, detail="仅 Kafka 类型连接支持 Redpanda Console")
     host_hint = public_host or request.headers.get("host")
@@ -787,10 +829,9 @@ def post_redpanda_open(
     request: Request,
     public_host: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_kafka_type(db, conn):
         raise HTTPException(status_code=400, detail="仅 Kafka 类型连接支持 Redpanda Console")
     host_hint = public_host or request.headers.get("host")
@@ -821,10 +862,9 @@ def post_redisinsight_open(
     request: Request,
     public_host: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_redis_type(db, conn):
         raise HTTPException(status_code=400, detail="仅 Redis 类型连接支持 RedisInsight")
     host_hint = public_host or request.headers.get("host")
@@ -848,10 +888,12 @@ def post_redisinsight_open(
 
 
 @router.post("/connections/{connection_id}/mqtt-open", response_model=MqttOpenOut)
-def post_mqtt_open(connection_id: int, db: Session = Depends(get_db)):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+def post_mqtt_open(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conn = _get_connection_or_404(db, connection_id, user)
     if not connection_is_mqtt_type(db, conn):
         raise HTTPException(status_code=400, detail="仅 MQTT 类型连接支持控制台")
     session = create_embed_session(db, conn, CONSOLE_MQTT, temporary=True)
@@ -861,21 +903,45 @@ def post_mqtt_open(connection_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/connections/{connection_id}/mqtt-config", response_model=MqttConsoleConfigOut)
-def get_mqtt_config(connection_id: int, db: Session = Depends(get_db)):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+def get_mqtt_config(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conn = _get_connection_or_404(db, connection_id, user)
     return MqttConsoleConfigOut(**prepare_mqtt_console_config(db, conn))
 
 
 @router.patch("/connections/reorder")
-def patch_reorder(data: ReorderRequest, db: Session = Depends(get_db)):
-    reorder_connections(db, [item.model_dump() for item in data.items])
+def patch_reorder(
+    data: ReorderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    allowed_ids = {
+        conn.id
+        for conn in filter_connections_for_user(
+            db,
+            user,
+            db.query(Connection)
+            .filter(Connection.id.in_([item.id for item in data.items]))
+            .all(),
+        )
+    }
+    items = [item.model_dump() for item in data.items if item.id in allowed_ids]
+    reorder_connections(db, items)
     return {"ok": True, "scope": data.scope}
 
 
 @router.post("/connections/batch-delete")
-def post_batch_delete_connections(data: BatchDeleteRequest, db: Session = Depends(get_db)):
+def post_batch_delete_connections(
+    data: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    connections = db.query(Connection).filter(Connection.id.in_(data.ids)).all()
+    for conn in connections:
+        ensure_connection_access(db, user, conn)
     deleted = batch_delete_connections(db, data.ids)
     return {"ok": True, "deleted": deleted}
 
@@ -884,7 +950,10 @@ def post_batch_delete_connections(data: BatchDeleteRequest, db: Session = Depend
 async def post_connection_ping(
     connection_id: int,
     sub_index: int | None = Query(None, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
+    _get_connection_or_404(db, connection_id, user)
     connection = await ping_connection_record(connection_id, sub_index=sub_index)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection or sub-link not found")
@@ -892,28 +961,56 @@ async def post_connection_ping(
 
 
 @router.get("/connections/{connection_id}", response_model=ConnectionOut)
-def get_connection(connection_id: int, db: Session = Depends(get_db)):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+def get_connection(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conn = _get_connection_or_404(db, connection_id, user)
     return ConnectionOut.from_connection(conn)
+
+
+@router.get(
+    "/connections/{connection_id}/k8s-alarm-cluster",
+    response_model=ConnectionK8sAlarmClusterOut,
+)
+def get_connection_k8s_alarm_cluster(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from app.k8s_connection_service import sync_k8s_cluster_from_connection
+    from app.services import connection_is_k8s_type
+
+    conn = _get_connection_or_404(db, connection_id, user)
+    if not connection_is_k8s_type(db, conn):
+        raise HTTPException(status_code=400, detail="仅 K8s 连接支持报警监控")
+    cluster = sync_k8s_cluster_from_connection(db, conn)
+    if not cluster:
+        raise HTTPException(status_code=400, detail="无法解析 K8s 集群配置，请检查连接地址")
+    return ConnectionK8sAlarmClusterOut(cluster_id=cluster.id, cluster_name=cluster.name)
 
 
 @router.patch("/connections/{connection_id}", response_model=ConnectionOut)
 def patch_connection(
-    connection_id: int, data: ConnectionUpdate, db: Session = Depends(get_db)
+    connection_id: int,
+    data: ConnectionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = _get_connection_or_404(db, connection_id, user)
+    if data.type is not None:
+        ensure_connection_type_permission(db, user, data.type)
     return ConnectionOut.from_connection(update_connection(db, conn, data))
 
 
 @router.delete("/connections/{connection_id}", status_code=204)
-def remove_connection(connection_id: int, db: Session = Depends(get_db)):
-    conn = db.query(Connection).filter(Connection.id == connection_id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+def remove_connection(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conn = _get_connection_or_404(db, connection_id, user)
     delete_connection(db, conn)
 
 

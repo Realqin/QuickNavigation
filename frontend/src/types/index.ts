@@ -43,6 +43,7 @@ export interface Connection {
   mqtt_ws_path?: string | null;
   mqtt_subscriptions?: MqttSubscription[];
   password_set?: boolean;
+  subscription_enabled?: boolean;
   is_reachable?: boolean | null;
   last_checked_at?: string | null;
   sub_links: SubLink[];
@@ -178,6 +179,7 @@ export interface ConnectionFormValues {
   database_name?: string;
   mqtt_ws_path?: string;
   mqtt_subscriptions?: MqttSubscription[];
+  subscription_enabled?: boolean;
 }
 
 export interface MqttConsoleConfig {
@@ -224,6 +226,8 @@ export interface PublicConfig {
   sshwifty_base_url?: string;
   redpanda_base_url?: string;
   redisinsight_base_url?: string;
+  /** redpanda | kafka-ui，与后端 KAFKA_CONSOLE_PROVIDER 一致 */
+  kafka_console_provider?: string;
 }
 
 export interface EmbedSession {

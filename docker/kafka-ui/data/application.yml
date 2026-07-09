@@ -1,0 +1,6 @@
+kafka:
+  clusters:
+    - name: quicknav
+      bootstrapServers: host.docker.internal:9092
+      properties:
+        security.protocol: PLAINTEXT

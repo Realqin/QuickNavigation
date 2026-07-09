@@ -15,6 +15,8 @@ export type PageType =
   | 'apiCases'
   | 'llmConfigs'
   | 'prompts'
+  | 'userManagement'
+  | 'operationLogs'
   | ConnectionMethodType;
 
 export interface AppTab {
@@ -33,6 +35,8 @@ export const PAGE_LABELS: Record<PageType, string> = {
   apiCases: '接口用例管理',
   llmConfigs: 'LLM配置',
   prompts: '提示词管理',
+  userManagement: '用户管理',
+  operationLogs: '操作日志',
   methodDatabase: '数据库',
   methodTerminal: 'Linux 终端',
   methodRedis: 'Redis',
@@ -44,7 +48,7 @@ export const CONNECTION_METHOD_MENU_KEY = 'connectionMethods';
 
 export const CONFIG_MENU_KEY = 'configManagement';
 
-export const CONFIG_PAGE_TYPES: PageType[] = ['llmConfigs', 'prompts', 'dict'];
+export const CONFIG_PAGE_TYPES: PageType[] = ['llmConfigs', 'prompts', 'dict', 'userManagement'];
 
 export const CONNECTION_METHOD_TYPES: ConnectionMethodType[] = [
   'methodDatabase',

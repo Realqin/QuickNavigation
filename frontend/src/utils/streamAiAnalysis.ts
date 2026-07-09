@@ -1,5 +1,6 @@
 import type { AiAnalysisResult } from '../types/aiAnalysis';
 import { resolveApiBaseUrl } from './apiBase';
+import { getStoredAccessToken } from './authStorage';
 
 export type AiAnalysisStreamEvent =
   | { type: 'status'; message: string }
@@ -72,9 +73,15 @@ export async function streamAiAnalysis(
   handlers: AiAnalysisStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getStoredAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(resolveStreamUrl(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
     signal,
   });

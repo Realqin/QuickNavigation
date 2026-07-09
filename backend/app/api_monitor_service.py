@@ -222,6 +222,8 @@ def list_api_monitor_services(
         sub = conn.subscription
         if not sub:
             continue
+        if not sub.enabled:
+            continue
         link_enabled = sub.link_enabled or {}
         snapshot_by_key = snapshots_by_sub.get(sub.id, {})
 
@@ -725,9 +727,14 @@ def sync_api_monitor_link(
     if not connection_is_gitlab_type(db, conn):
         raise ValueError("仅支持 GitLab 类型连接")
 
-    link_enabled = sub.link_enabled or {}
-    if require_enabled and not bool(link_enabled.get(link_key)):
-        raise ValueError("请先在订阅列表中启用该链接")
+    if require_enabled:
+        if not sub.enabled:
+            raise ValueError("请先在连接管理中启用订阅")
+        link_enabled = sub.link_enabled or {}
+        if not bool(link_enabled.get(link_key)):
+            raise ValueError("请先在订阅列表中启用该链接")
+    else:
+        link_enabled = sub.link_enabled or {}
 
     target = resolve_link_target(conn, link_key)
     if not target:
